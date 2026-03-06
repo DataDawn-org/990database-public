@@ -1,0 +1,158 @@
+{% extends "pages/base_datadawn.html" %}
+
+{% block title %}DAF Grant Detail — DataDawn{% endblock %}
+
+{% block content %}
+
+{% set daf_rows = sql("SELECT si.id, si.funder_ein, si.funder_name, si.tax_year, si.grant_type, si.recipient_name, si.recipient_ein, si.recipient_city, si.recipient_state, si.recipient_zip, si.recipient_country, si.amount, si.purpose, b.name AS funder_org_name FROM schedule_i_grants si LEFT JOIN bmf b ON b.ein = si.funder_ein WHERE si.id = :id LIMIT 1", {"id": id}, database="990data_public") %}
+
+{% if not daf_rows %}
+
+<div class="not-found">
+  <h1>DAF Grant Not Found</h1>
+  <p>No DAF grant record with ID {{ id }}.</p>
+  <a href="https://datadawn.org/explore">Search for grants</a>
+</div>
+
+{% else %}
+{% set g = daf_rows[0] %}
+{% set funder_name = g["funder_org_name"] or g["funder_name"] or "DAF Sponsor" %}
+
+{% if g["recipient_ein"] %}
+{% set recipient_info = sql("SELECT sub.org_name, sub.tax_year, sub.total_revenue, sub.total_assets_eoy, sub.return_type FROM (SELECT r.org_name, r.tax_year, r.total_revenue, r.total_assets_eoy, r.return_type, ROW_NUMBER() OVER (ORDER BY r.tax_year DESC, r.object_id DESC) AS rn FROM returns r WHERE r.ein = :rein AND r.return_type IN ('990', '990EZ')) sub WHERE sub.rn = 1 LIMIT 1", {"rein": g["recipient_ein"]}, database="990data_public") %}
+
+{% set related_grants = sql("SELECT si2.id, si2.funder_ein, si2.funder_name, si2.tax_year, si2.amount, si2.purpose FROM schedule_i_grants si2 WHERE si2.recipient_ein = :rein AND si2.id != :grant_id ORDER BY si2.amount DESC LIMIT 20", {"rein": g["recipient_ein"], "grant_id": g["id"]}, database="990data_public") %}
+{% else %}
+{% set recipient_info = [] %}
+{% set related_grants = sql("SELECT si2.id, si2.funder_ein, si2.funder_name, si2.tax_year, si2.amount, si2.purpose FROM schedule_i_grants si2 WHERE si2.recipient_name = :rname COLLATE NOCASE AND si2.id != :grant_id ORDER BY si2.amount DESC LIMIT 20", {"rname": g["recipient_name"], "grant_id": g["id"]}, database="990data_public") %}
+{% endif %}
+
+<div class="page-header">
+  <div class="grant-flow-header">
+    <span class="flow-entity"><a href="/org/{{ g['funder_ein'] }}">{{ funder_name }}</a></span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-entity">
+      {% if g["recipient_ein"] %}
+      <a href="/org/{{ g['recipient_ein'] }}">{{ g["recipient_name"] or "Unknown Recipient" }}</a>
+      {% else %}
+      {{ g["recipient_name"] or "Unknown Recipient" }}
+      {% endif %}
+    </span>
+  </div>
+  <div class="grant-amount-hero">{{ "${:,.0f}".format(g["amount"]) if g["amount"] is not none else "$0" }}</div>
+  <div class="subtitle">DAF Grant #{{ g["id"] }}</div>
+</div>
+
+<div class="section">
+  <h2 class="section-title">Grant Details</h2>
+  <div class="detail-grid">
+    <div class="detail-item">
+      <div class="detail-label">Amount</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(g["amount"]) if g["amount"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Tax Year</div>
+      <div class="detail-value">{{ g["tax_year"] or "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Grant Type</div>
+      <div class="detail-value">{{ g["grant_type"] or "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Location</div>
+      <div class="detail-value">{{ [g["recipient_city"], g["recipient_state"], g["recipient_country"]]|select|join(", ") or "&mdash;"|safe }}</div>
+    </div>
+    {% if g["recipient_ein"] %}
+    <div class="detail-item">
+      <div class="detail-label">Recipient EIN</div>
+      <div class="detail-value"><a href="/org/{{ g['recipient_ein'] }}" class="ein-badge">{{ g["recipient_ein"][:2] }}-{{ g["recipient_ein"][2:] }}</a></div>
+    </div>
+    {% endif %}
+    {% if g["recipient_zip"] %}
+    <div class="detail-item">
+      <div class="detail-label">ZIP</div>
+      <div class="detail-value">{{ g["recipient_zip"] }}</div>
+    </div>
+    {% endif %}
+    <div class="detail-item">
+      <div class="detail-label">Funder</div>
+      <div class="detail-value"><a href="/org/{{ g['funder_ein'] }}">{{ funder_name }}</a></div>
+    </div>
+    {% set funder_filing = sql("SELECT r.object_id FROM returns r WHERE r.ein = :ein AND r.tax_year = :ty ORDER BY r.object_id DESC LIMIT 1", {"ein": g["funder_ein"], "ty": g["tax_year"]}, database="990data_public") %}
+    {% if funder_filing %}
+    <div class="detail-item">
+      <div class="detail-label">Filing</div>
+      <div class="detail-value"><a href="/filing/{{ funder_filing[0]['object_id'] }}">View full filing</a></div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if g["purpose"] %}
+<div class="section">
+  <h2 class="section-title">Purpose</h2>
+  <p style="color: var(--text-secondary); line-height: 1.7;">{{ g["purpose"] }}</p>
+</div>
+{% endif %}
+
+{% if g["recipient_ein"] and recipient_info %}
+{% set ri = recipient_info[0] %}
+<div class="section">
+  <h2 class="section-title">Recipient Organization</h2>
+  <div class="detail-grid">
+    <div class="detail-item">
+      <div class="detail-label">Organization</div>
+      <div class="detail-value"><a href="/org/{{ g['recipient_ein'] }}">{{ ri["org_name"] }}</a></div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Latest Filing Year</div>
+      <div class="detail-value">{{ ri["tax_year"] }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Revenue</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(ri["total_revenue"]) if ri["total_revenue"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Assets</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(ri["total_assets_eoy"]) if ri["total_assets_eoy"] is not none else "&mdash;"|safe }}</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if related_grants %}
+<div class="section">
+  <h2 class="section-title">Other DAF Grants to {{ g["recipient_name"] }}</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Funder</th>
+        <th>Year</th>
+        <th class="money">Amount</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rg in related_grants %}
+      <tr>
+        <td>
+          {% if rg["funder_ein"] %}
+          <a href="/org/{{ rg['funder_ein'] }}">{{ rg["funder_name"] or rg["funder_ein"] }}</a>
+          {% else %}
+          {{ rg["funder_name"] or "&mdash;"|safe }}
+          {% endif %}
+        </td>
+        <td>{{ rg["tax_year"] or "&mdash;"|safe }}</td>
+        <td class="money"><a href="/daf/{{ rg['id'] }}">{{ "${:,.0f}".format(rg["amount"]) if rg["amount"] is not none else "$0" }}</a></td>
+        <td class="purpose">{{ rg["purpose"][:100] if rg["purpose"] else "&mdash;"|safe }}{% if rg["purpose"] and rg["purpose"]|length > 100 %}&hellip;{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

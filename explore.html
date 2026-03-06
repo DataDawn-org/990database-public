@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Explore — DataDawn</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Mono:wght@300;400;500&family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --night: #0a0e1a;
+            --deep: #111827;
+            --twilight: #1a2342;
+            --horizon: #2a3a6b;
+            --dawn-amber: #f59e0b;
+            --dawn-gold: #fbbf24;
+            --dawn-light: #fde68a;
+            --dawn-white: #fef3c7;
+            --dawn-rose: #fb923c;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --surface: rgba(255,255,255,0.03);
+            --surface-hover: rgba(255,255,255,0.06);
+            --border: rgba(255,255,255,0.08);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--night);
+            color: var(--text-primary);
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+        }
+
+        /* Grain overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* ===== NAV ===== */
+        nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1.5rem 3rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .nav-brand {
+            font-family: 'DM Serif Display', serif;
+            font-size: 1.4rem;
+            color: var(--dawn-gold);
+            text-decoration: none;
+            letter-spacing: 0.02em;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .nav-links a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 400;
+            color: var(--text-muted);
+            text-decoration: none;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            color: var(--dawn-gold);
+        }
+
+        /* ===== SEARCH HEADER ===== */
+        .search-header {
+            padding: 4rem 3rem 2rem;
+            max-width: 900px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .search-header h1 {
+            font-family: 'DM Serif Display', serif;
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 400;
+            background: linear-gradient(135deg, var(--dawn-light), var(--dawn-amber));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.75rem;
+        }
+
+        .search-header p {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            font-weight: 300;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        /* ===== SEARCH BOX ===== */
+        .search-container {
+            max-width: 800px;
+            margin: 2rem auto 0;
+            padding: 0 3rem;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: var(--deep);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.25rem;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .search-box:focus-within {
+            border-color: rgba(245, 158, 11, 0.4);
+            box-shadow: 0 0 30px rgba(245, 158, 11, 0.08);
+        }
+
+        .search-icon {
+            padding: 0 1rem;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .search-box input {
+            flex: 1;
+            background: none;
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 300;
+            padding: 1rem 0.5rem;
+        }
+
+        .search-box input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-btn {
+            background: linear-gradient(135deg, var(--dawn-amber), var(--dawn-rose));
+            border: none;
+            color: var(--night);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            font-weight: 500;
+            padding: 0.9rem 1.8rem;
+            border-radius: 9px;
+            cursor: pointer;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            transition: opacity 0.2s, transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .search-btn:hover {
+            opacity: 0.9;
+            transform: scale(1.02);
+        }
+
+        /* ===== TABS ===== */
+        .tabs {
+            display: flex;
+            justify-content: center;
+            gap: 0.25rem;
+            margin: 2rem auto 0;
+            max-width: 800px;
+            padding: 0 3rem;
+        }
+
+        .tab {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            font-weight: 400;
+            color: var(--text-muted);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 0.6rem 1.2rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            transition: all 0.3s;
+            border-radius: 6px;
+        }
+
+        .tab:hover {
+            color: var(--text-secondary);
+            background: var(--surface-hover);
+        }
+
+        .tab.active {
+            color: var(--dawn-gold);
+            border-color: rgba(245, 158, 11, 0.3);
+            background: rgba(245, 158, 11, 0.06);
+        }
+
+        /* ===== RESULTS ===== */
+        .results-area {
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 0 3rem;
+        }
+
+        .results-status {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            letter-spacing: 0.05em;
+            min-height: 1.2em;
+        }
+
+        .results-status .count {
+            color: var(--dawn-gold);
+        }
+
+        /* Result cards */
+        .result-card-link { text-decoration: none; color: inherit; display: block; }
+        .result-card-link:hover { text-decoration: none; }
+
+        .result-card {
+            background: var(--deep);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-bottom: 0.75rem;
+            transition: border-color 0.3s, transform 0.2s;
+            cursor: pointer;
+        }
+
+        .result-card:hover {
+            border-color: rgba(245, 158, 11, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .result-card .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .result-card .org-name {
+            font-family: 'DM Serif Display', serif;
+            font-size: 1.15rem;
+            color: var(--text-primary);
+            line-height: 1.3;
+        }
+
+        .result-card .org-ein {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            background: var(--surface);
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+
+        .result-card .card-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .result-card .detail {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .result-card .detail-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .result-card .detail-value {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        .result-card .detail-value.money {
+            color: var(--dawn-gold);
+            font-family: 'IBM Plex Mono', monospace;
+            font-weight: 500;
+        }
+
+        /* Grant card specific */
+        .result-card .grant-flow {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .grant-flow .from, .grant-flow .to {
+            font-size: 0.95rem;
+        }
+
+        .grant-flow .from {
+            color: var(--text-secondary);
+        }
+
+        .grant-flow .arrow {
+            color: var(--dawn-amber);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        .grant-flow .to {
+            color: var(--text-primary);
+            font-family: 'DM Serif Display', serif;
+            font-size: 1.1rem;
+        }
+
+        /* ===== LOADING ===== */
+        .loading {
+            text-align: center;
+            padding: 3rem;
+        }
+
+        .loading-dots {
+            display: inline-flex;
+            gap: 0.4rem;
+        }
+
+        .loading-dots span {
+            width: 6px;
+            height: 6px;
+            background: var(--dawn-amber);
+            border-radius: 50%;
+            animation: loadPulse 1.2s ease-in-out infinite;
+        }
+
+        .loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+        .loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+        @keyframes loadPulse {
+            0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+            40% { opacity: 1; transform: scale(1); }
+        }
+
+        /* ===== EMPTY STATE ===== */
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+        }
+
+        .empty-state .empty-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        .empty-state p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            font-weight: 300;
+        }
+
+        .empty-state .hint {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 1rem;
+            opacity: 0.6;
+        }
+
+        /* Example searches */
+        .examples {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .example-chip {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 0.4rem 0.9rem;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            letter-spacing: 0.03em;
+        }
+
+        .example-chip:hover {
+            color: var(--dawn-gold);
+            border-color: rgba(245, 158, 11, 0.3);
+            background: rgba(245, 158, 11, 0.06);
+        }
+
+        /* ===== PAGINATION ===== */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 2rem;
+            padding-bottom: 4rem;
+        }
+
+        .page-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 0.6rem 1.2rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            letter-spacing: 0.05em;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            color: var(--dawn-gold);
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+
+        .page-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        /* ===== FOOTER ===== */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 2rem 3rem;
+            text-align: center;
+        }
+
+        .footer-text {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            letter-spacing: 0.05em;
+        }
+
+        .footer-text a {
+            color: var(--dawn-amber);
+            text-decoration: none;
+        }
+
+        /* ===== FILTERS ===== */
+        .filters {
+            max-width: 800px;
+            margin: 1rem auto 0;
+            padding: 0 3rem;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            flex: 1;
+            min-width: 120px;
+        }
+
+        .filter-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .filter-select {
+            background: var(--deep);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.8rem;
+            padding: 0.5rem 0.6rem;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.3s;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2364748b' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.6rem center;
+            padding-right: 2rem;
+        }
+
+        .filter-select:focus {
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        .filter-select option {
+            background: var(--deep);
+            color: var(--text-secondary);
+        }
+
+        .filter-range {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .filter-range .filter-select {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .filter-dash {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            flex-shrink: 0;
+        }
+
+        .filter-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 0.5rem;
+        }
+
+        .filter-clear {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            cursor: pointer;
+            letter-spacing: 0.05em;
+            padding: 0.3rem 0;
+            transition: color 0.3s;
+        }
+
+        .filter-clear:hover {
+            color: var(--dawn-gold);
+        }
+
+        /* ===== SQL PANEL ===== */
+        .sql-toggle {
+            text-align: center;
+            margin-top: 1rem;
+        }
+
+        .sql-toggle button {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            cursor: pointer;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            transition: color 0.3s;
+            padding: 0.5rem 1rem;
+        }
+
+        .sql-toggle button:hover {
+            color: var(--dawn-gold);
+        }
+
+        .sql-panel {
+            max-width: 800px;
+            margin: 1rem auto 0;
+            padding: 0 3rem;
+            display: none;
+        }
+
+        .sql-panel.visible {
+            display: block;
+        }
+
+        .sql-panel textarea {
+            width: 100%;
+            min-height: 120px;
+            background: var(--deep);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--dawn-light);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.85rem;
+            padding: 1.2rem;
+            resize: vertical;
+            outline: none;
+            line-height: 1.6;
+        }
+
+        .sql-panel textarea:focus {
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        .sql-panel .sql-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 0.75rem;
+        }
+
+        .sql-run {
+            background: linear-gradient(135deg, var(--dawn-amber), var(--dawn-rose));
+            border: none;
+            color: var(--night);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 500;
+            padding: 0.7rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .sql-hint {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            nav { padding: 1rem 1.5rem; }
+            .nav-links { gap: 1rem; }
+            .nav-links a { font-size: 0.65rem; }
+            .search-header { padding: 2.5rem 1.5rem 1.5rem; }
+            .search-container { padding: 0 1.5rem; }
+            .tabs { padding: 0 1.5rem; flex-wrap: wrap; }
+            .filters { padding: 0 1.5rem; }
+            .filter-row { flex-direction: column; }
+            .filter-group { min-width: 100%; }
+            .results-area { padding: 0 1.5rem; }
+            .sql-panel { padding: 0 1.5rem; }
+            .result-card .card-header { flex-direction: column; }
+            .result-card .card-details { gap: 1rem; }
+            footer { padding: 2rem 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="https://datadawn.org" class="nav-brand">DataDawn</a>
+        <div class="nav-links">
+            <a href="https://datadawn.org">Home</a>
+            <a href="#" class="active">Explore</a>
+            <a href="https://data.datadawn.org">Raw Database</a>
+        </div>
+    </nav>
+
+    <div class="search-header">
+        <h1>Explore the data</h1>
+        <p>Search 5 million IRS filings, 12.5 million foundation grants, 6.4 million public charity grants, and 1.25 million DAF disbursements.</p>
+    </div>
+
+    <div class="search-container">
+        <div class="search-box">
+            <div class="search-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </div>
+            <input type="text" id="searchInput" placeholder="Search by organization name, EIN, or keyword..." autocomplete="off">
+            <button class="search-btn" id="searchBtn">Search</button>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active" data-tab="orgs">Organizations</div>
+        <div class="tab" data-tab="grants">Foundation Grants</div>
+        <div class="tab" data-tab="charity">Public Charity Grants</div>
+        <div class="tab" data-tab="daf">DAF Grants</div>
+    </div>
+
+    <div class="filters" id="filters">
+        <div class="filter-row">
+            <div class="filter-group">
+                <label class="filter-label">State</label>
+                <select id="filterState" class="filter-select">
+                    <option value="">All states</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">Year</label>
+                <div class="filter-range">
+                    <select id="filterYearFrom" class="filter-select">
+                        <option value="">From</option>
+                    </select>
+                    <span class="filter-dash">–</span>
+                    <select id="filterYearTo" class="filter-select">
+                        <option value="">To</option>
+                    </select>
+                </div>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label">Amount</label>
+                <div class="filter-range">
+                    <select id="filterAmountMin" class="filter-select">
+                        <option value="">Min</option>
+                        <option value="1000">$1K+</option>
+                        <option value="10000">$10K+</option>
+                        <option value="100000">$100K+</option>
+                        <option value="1000000">$1M+</option>
+                        <option value="10000000">$10M+</option>
+                        <option value="100000000">$100M+</option>
+                    </select>
+                    <span class="filter-dash">–</span>
+                    <select id="filterAmountMax" class="filter-select">
+                        <option value="">Max</option>
+                        <option value="10000">Under $10K</option>
+                        <option value="100000">Under $100K</option>
+                        <option value="1000000">Under $1M</option>
+                        <option value="10000000">Under $10M</option>
+                        <option value="100000000">Under $100M</option>
+                    </select>
+                </div>
+            </div>
+            <div class="filter-group" id="returnTypeGroup">
+                <label class="filter-label">Filing Type</label>
+                <select id="filterReturnType" class="filter-select">
+                    <option value="">All types</option>
+                    <option value="990">990</option>
+                    <option value="990EZ">990-EZ</option>
+                    <option value="990PF">990-PF</option>
+                </select>
+            </div>
+            <div class="filter-group" id="grantTypeGroup" style="display:none;">
+                <label class="filter-label">Grant Type</label>
+                <select id="filterGrantType" class="filter-select">
+                    <option value="">All types</option>
+                    <option value="paid">Paid</option>
+                    <option value="accrued">Accrued</option>
+                    <option value="set_aside">Set Aside</option>
+                </select>
+            </div>
+        </div>
+        <div class="filter-actions">
+            <button class="filter-clear" id="filterClear">Clear filters</button>
+        </div>
+    </div>
+
+    <div class="sql-toggle">
+        <button id="sqlToggle">&#9662; Custom SQL</button>
+    </div>
+
+    <div class="sql-panel" id="sqlPanel">
+        <textarea id="sqlInput" spellcheck="false">SELECT org_name, ein, state, total_revenue, total_assets_eoy
+FROM returns
+WHERE org_name LIKE '%humane society%'
+ORDER BY total_revenue DESC
+LIMIT 25</textarea>
+        <div class="sql-actions">
+            <span class="sql-hint">Read-only access to all 12 tables</span>
+            <button class="sql-run" id="sqlRun">Run query</button>
+        </div>
+    </div>
+
+    <div class="results-area">
+        <div class="results-status" id="resultsStatus"></div>
+        <div id="results">
+            <div class="empty-state">
+                <div class="empty-icon">◈</div>
+                <p>Search for any U.S. nonprofit, foundation, or grant recipient</p>
+                <div class="hint">All data sourced from IRS electronic filings</div>
+                <div class="examples">
+                    <span class="example-chip" data-query="United Way">United Way</span>
+                    <span class="example-chip" data-query="Habitat for Humanity">Habitat for Humanity</span>
+                    <span class="example-chip" data-query="Goodwill">Goodwill</span>
+                    <span class="example-chip" data-query="YMCA">YMCA</span>
+                    <span class="example-chip" data-query="Salvation Army">Salvation Army</span>
+                </div>
+            </div>
+        </div>
+        <div class="pagination" id="pagination" style="display:none;">
+            <button class="page-btn" id="prevBtn" disabled>&larr; Previous</button>
+            <button class="page-btn" id="nextBtn">Next &rarr;</button>
+        </div>
+    </div>
+
+    <footer>
+        <div class="footer-text">
+            <a href="https://datadawn.org">DataDawn</a> &mdash; Pure information from public records &mdash; Free forever
+        </div>
+    </footer>
+
+    <script>
+        const API = 'https://data.datadawn.org/990data_public';
+        let currentTab = 'orgs';
+        let currentQuery = '';
+        let currentOffset = 0;
+        const PAGE_SIZE = 20;
+        let nextUrl = null;
+
+        // Elements
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const resultsDiv = document.getElementById('results');
+        const statusDiv = document.getElementById('resultsStatus');
+        const paginationDiv = document.getElementById('pagination');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const sqlToggle = document.getElementById('sqlToggle');
+        const sqlPanel = document.getElementById('sqlPanel');
+        const sqlInput = document.getElementById('sqlInput');
+        const sqlRun = document.getElementById('sqlRun');
+        const tabs = document.querySelectorAll('.tab');
+        const examples = document.querySelectorAll('.example-chip');
+        const filterState = document.getElementById('filterState');
+        const filterYearFrom = document.getElementById('filterYearFrom');
+        const filterYearTo = document.getElementById('filterYearTo');
+        const filterAmountMin = document.getElementById('filterAmountMin');
+        const filterAmountMax = document.getElementById('filterAmountMax');
+        const filterReturnType = document.getElementById('filterReturnType');
+        const filterGrantType = document.getElementById('filterGrantType');
+        const filterClear = document.getElementById('filterClear');
+        const returnTypeGroup = document.getElementById('returnTypeGroup');
+        const grantTypeGroup = document.getElementById('grantTypeGroup');
+
+        // Populate state dropdown
+        const states = ['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','PR','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
+        states.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s; opt.textContent = s;
+            filterState.appendChild(opt);
+        });
+
+        // Populate year dropdowns
+        const currentYear = new Date().getFullYear();
+        for (let y = currentYear; y >= 2011; y--) {
+            [filterYearFrom, filterYearTo].forEach(sel => {
+                const opt = document.createElement('option');
+                opt.value = y; opt.textContent = y;
+                sel.appendChild(opt);
+            });
+        }
+
+        // Toggle filter visibility per tab
+        function updateFilterVisibility() {
+            if (currentTab === 'orgs') {
+                returnTypeGroup.style.display = '';
+                grantTypeGroup.style.display = 'none';
+            } else if (currentTab === 'grants') {
+                returnTypeGroup.style.display = 'none';
+                grantTypeGroup.style.display = '';
+            } else {
+                returnTypeGroup.style.display = 'none';
+                grantTypeGroup.style.display = 'none';
+            }
+        }
+
+        // Clear filters
+        filterClear.addEventListener('click', () => {
+            filterState.value = '';
+            filterYearFrom.value = '';
+            filterYearTo.value = '';
+            filterAmountMin.value = '';
+            filterAmountMax.value = '';
+            filterReturnType.value = '';
+            filterGrantType.value = '';
+        });
+
+        // Tab switching
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentTab = tab.dataset.tab;
+                updateFilterVisibility();
+                if (currentQuery) {
+                    currentOffset = 0;
+                    doSearch();
+                }
+            });
+        });
+        updateFilterVisibility();
+
+        // Example chips
+        examples.forEach(chip => {
+            chip.addEventListener('click', () => {
+                searchInput.value = chip.dataset.query;
+                currentOffset = 0;
+                doSearch();
+            });
+        });
+
+        // Search triggers
+        searchBtn.addEventListener('click', () => { currentOffset = 0; doSearch(); });
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { currentOffset = 0; doSearch(); }
+        });
+
+        // SQL toggle
+        sqlToggle.addEventListener('click', () => {
+            sqlPanel.classList.toggle('visible');
+            sqlToggle.textContent = sqlPanel.classList.contains('visible') ? '▴ Custom SQL' : '▾ Custom SQL';
+        });
+
+        // SQL run
+        sqlRun.addEventListener('click', runSQL);
+
+        // Pagination
+        prevBtn.addEventListener('click', () => {
+            if (currentOffset >= PAGE_SIZE) {
+                currentOffset -= PAGE_SIZE;
+                doSearch();
+            }
+        });
+        nextBtn.addEventListener('click', () => {
+            if (nextUrl) {
+                currentOffset += PAGE_SIZE;
+                doSearch();
+            }
+        });
+
+        function formatMoney(val) {
+            if (val == null || val === '') return '—';
+            const num = Number(val);
+            if (isNaN(num)) return val;
+            if (Math.abs(num) >= 1e9) return '$' + (num / 1e9).toFixed(1) + 'B';
+            if (Math.abs(num) >= 1e6) return '$' + (num / 1e6).toFixed(1) + 'M';
+            if (Math.abs(num) >= 1e3) return '$' + (num / 1e3).toFixed(0) + 'K';
+            return '$' + num.toLocaleString();
+        }
+
+        function formatEIN(ein) {
+            if (!ein) return '';
+            const s = String(ein).padStart(9, '0');
+            return s.slice(0, 2) + '-' + s.slice(2);
+        }
+
+        function buildFilters() {
+            const clauses = [];
+            const st = filterState.value;
+            const yFrom = filterYearFrom.value;
+            const yTo = filterYearTo.value;
+            const aMin = filterAmountMin.value;
+            const aMax = filterAmountMax.value;
+            const rType = filterReturnType.value;
+            const gType = filterGrantType.value;
+
+            switch (currentTab) {
+                case 'orgs':
+                    if (st) clauses.push(`r.state = '${st}'`);
+                    if (yFrom) clauses.push(`r.tax_year >= ${yFrom}`);
+                    if (yTo) clauses.push(`r.tax_year <= ${yTo}`);
+                    if (aMin) clauses.push(`r.total_revenue >= ${aMin}`);
+                    if (aMax) clauses.push(`r.total_revenue <= ${aMax}`);
+                    if (rType) clauses.push(`r.return_type = '${rType}'`);
+                    break;
+                case 'grants':
+                    if (st) clauses.push(`g.recipient_state = '${st}'`);
+                    if (yFrom) clauses.push(`r.tax_year >= ${yFrom}`);
+                    if (yTo) clauses.push(`r.tax_year <= ${yTo}`);
+                    if (aMin) clauses.push(`g.amount >= ${aMin}`);
+                    if (aMax) clauses.push(`g.amount <= ${aMax}`);
+                    if (gType) clauses.push(`g.grant_type = '${gType}'`);
+                    break;
+                case 'charity':
+                    if (st) clauses.push(`s.recipient_state = '${st}'`);
+                    if (yFrom) clauses.push(`r.tax_year >= ${yFrom}`);
+                    if (yTo) clauses.push(`r.tax_year <= ${yTo}`);
+                    if (aMin) clauses.push(`s.cash_grant_amt >= ${aMin}`);
+                    if (aMax) clauses.push(`s.cash_grant_amt <= ${aMax}`);
+                    break;
+                case 'daf':
+                    if (st) clauses.push(`s.recipient_state = '${st}'`);
+                    if (yFrom) clauses.push(`s.tax_year >= ${yFrom}`);
+                    if (yTo) clauses.push(`s.tax_year <= ${yTo}`);
+                    if (aMin) clauses.push(`s.amount >= ${aMin}`);
+                    if (aMax) clauses.push(`s.amount <= ${aMax}`);
+                    break;
+            }
+            return clauses.length > 0 ? ' AND ' + clauses.join(' AND ') : '';
+        }
+
+        async function doSearch() {
+            currentQuery = searchInput.value.trim();
+            if (!currentQuery) return;
+
+            resultsDiv.innerHTML = '<div class="loading"><div class="loading-dots"><span></span><span></span><span></span></div></div>';
+            statusDiv.textContent = '';
+            paginationDiv.style.display = 'none';
+
+            let url;
+            const qSafe = currentQuery.replace(/"/g, '""');
+            const filters = buildFilters();
+
+            let sql, countSql;
+            switch (currentTab) {
+                case 'orgs':
+                    sql = `SELECT r.* FROM returns r JOIN fts_returns f ON r.rowid = f.rowid WHERE fts_returns MATCH '"${qSafe}"'${filters} ORDER BY r.total_revenue DESC LIMIT ${PAGE_SIZE} OFFSET ${currentOffset}`;
+                    countSql = `SELECT COUNT(*) as cnt FROM fts_returns WHERE fts_returns MATCH '"${qSafe}"'`;
+                    break;
+                case 'grants':
+                    sql = `SELECT g.*, b.name AS funder_name FROM grants g JOIN fts_grants f ON g.rowid = f.rowid LEFT JOIN bmf b ON b.ein = g.ein WHERE fts_grants MATCH '"${qSafe}"'${filters} ORDER BY f.rank LIMIT ${PAGE_SIZE} OFFSET ${currentOffset}`;
+                    countSql = `SELECT COUNT(*) as cnt FROM fts_grants WHERE fts_grants MATCH '"${qSafe}"'`;
+                    break;
+                case 'charity':
+                    sql = `SELECT s.*, b.name AS funder_name FROM schedule_i_990 s JOIN fts_schedule_i f ON s.id = f.rowid LEFT JOIN bmf b ON b.ein = s.ein WHERE fts_schedule_i MATCH '"${qSafe}"'${filters} ORDER BY f.rank LIMIT ${PAGE_SIZE} OFFSET ${currentOffset}`;
+                    countSql = `SELECT COUNT(*) as cnt FROM fts_schedule_i WHERE fts_schedule_i MATCH '"${qSafe}"'`;
+                    break;
+                case 'daf':
+                    sql = `SELECT s.* FROM schedule_i_grants s JOIN fts_daf f ON s.rowid = f.rowid WHERE fts_daf MATCH '"${qSafe}"'${filters} ORDER BY f.rank LIMIT ${PAGE_SIZE} OFFSET ${currentOffset}`;
+                    countSql = `SELECT COUNT(*) as cnt FROM fts_daf WHERE fts_daf MATCH '"${qSafe}"'`;
+                    break;
+            }
+            const dataUrl = `${API}.json?sql=${encodeURIComponent(sql)}&_shape=objects`;
+            const countUrl = `${API}.json?sql=${encodeURIComponent(countSql)}&_shape=objects`;
+
+            try {
+                const [resp, countResp] = await Promise.all([
+                    fetch(dataUrl),
+                    fetch(countUrl).catch(() => null)
+                ]);
+                if (!resp.ok) {
+                    const errData = await resp.json().catch(() => ({}));
+                    throw new Error(errData.error || `HTTP ${resp.status}`);
+                }
+                const data = await resp.json();
+                let totalCount = null;
+                if (countResp && countResp.ok) {
+                    const countData = await countResp.json();
+                    totalCount = countData.rows && countData.rows[0] ? countData.rows[0].cnt : null;
+                }
+
+                nextUrl = (data.rows || []).length === PAGE_SIZE;
+                const rows = data.rows || [];
+
+                if (rows.length === 0) {
+                    resultsDiv.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">∅</div>
+                            <p>No results for "${currentQuery}" in ${getTabLabel()}</p>
+                            <div class="hint">Try a different search term or switch tabs</div>
+                        </div>`;
+                    statusDiv.textContent = '0 results';
+                    return;
+                }
+
+                const countLabel = totalCount ? Number(totalCount).toLocaleString() : `${rows.length}${nextUrl ? '+' : ''}`;
+                const offsetLabel = currentOffset > 0 ? ` (showing ${currentOffset + 1}–${currentOffset + rows.length})` : '';
+                statusDiv.innerHTML = `<span class="count">${countLabel}</span> results${offsetLabel} in ${getTabLabel()}`;
+
+                let html = '';
+                switch (currentTab) {
+                    case 'orgs':
+                        html = rows.map(r => renderOrgCard(r)).join('');
+                        break;
+                    case 'grants':
+                        html = rows.map(r => renderGrantCard(r)).join('');
+                        break;
+                    case 'charity':
+                        html = rows.map(r => renderCharityGrantCard(r)).join('');
+                        break;
+                    case 'daf':
+                        html = rows.map(r => renderDAFCard(r)).join('');
+                        break;
+                }
+                resultsDiv.innerHTML = html;
+
+                // Pagination
+                paginationDiv.style.display = 'flex';
+                prevBtn.disabled = currentOffset === 0;
+                nextBtn.disabled = !nextUrl;
+
+            } catch (err) {
+                resultsDiv.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">⚠</div>
+                        <p>Error fetching data</p>
+                        <div class="hint">${err.message}. Try the <a href="https://data.datadawn.org" style="color:var(--dawn-amber);">raw database</a> instead.</div>
+                    </div>`;
+            }
+        }
+
+        function getTabLabel() {
+            switch (currentTab) {
+                case 'orgs': return 'Organizations';
+                case 'grants': return 'Foundation Grants';
+                case 'charity': return 'Public Charity Grants';
+                case 'daf': return 'DAF Grants';
+            }
+        }
+
+        function renderOrgCard(r) {
+            return `
+                <a href="https://data.datadawn.org/org/${r.ein}" class="result-card-link" target="_blank">
+                <div class="result-card">
+                    <div class="card-header">
+                        <div class="org-name">${esc(r.org_name || 'Unknown')}</div>
+                        <div class="org-ein">${formatEIN(r.ein)}</div>
+                    </div>
+                    <div class="card-details">
+                        <div class="detail">
+                            <span class="detail-label">State</span>
+                            <span class="detail-value">${esc(r.state || '—')}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Tax Year</span>
+                            <span class="detail-value">${r.tax_year || '—'}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Type</span>
+                            <span class="detail-value">${esc(r.return_type || '—')}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Revenue</span>
+                            <span class="detail-value money">${formatMoney(r.total_revenue)}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Assets</span>
+                            <span class="detail-value money">${formatMoney(r.total_assets_eoy)}</span>
+                        </div>
+                    </div>
+                </div>
+                </a>`;
+        }
+
+        function renderGrantCard(r) {
+            return `
+                <a href="https://data.datadawn.org/grant/${r.id}" class="result-card-link" target="_blank">
+                <div class="result-card">
+                    <div class="grant-flow">
+                        <span class="from">${esc(r.funder_name || r.ein || 'Unknown funder')}</span>
+                        <span class="arrow">→</span>
+                        <span class="to">${esc(r.recipient_name || 'Unknown')}</span>
+                    </div>
+                    <div class="card-details">
+                        <div class="detail">
+                            <span class="detail-label">Amount</span>
+                            <span class="detail-value money">${formatMoney(r.amount)}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Tax Year</span>
+                            <span class="detail-value">${esc(r.tax_year || r.grant_date || '—')}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Location</span>
+                            <span class="detail-value">${esc([r.recipient_city, r.recipient_state].filter(Boolean).join(', ') || '—')}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Purpose</span>
+                            <span class="detail-value">${esc(truncate(r.purpose, 80) || '—')}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Type</span>
+                            <span class="detail-value">${esc(r.grant_type || '—')}</span>
+                        </div>
+                    </div>
+                </div>
+                </a>`;
+        }
+
+        function renderCharityGrantCard(r) {
+            const total = (r.cash_grant_amt || 0) + (r.non_cash_amt || 0);
+            return `
+                <a href="https://data.datadawn.org/990data_public/schedule_i_990/${r.id}" class="result-card-link" target="_blank">
+                <div class="result-card">
+                    <div class="grant-flow">
+                        <span class="from">${esc(r.funder_name || r.ein || 'Unknown')}</span>
+                        <span class="arrow">→</span>
+                        <span class="to">${esc(r.recipient_name || 'Unknown')}</span>
+                    </div>
+                    <div class="card-details">
+                        <div class="detail">
+                            <span class="detail-label">Cash</span>
+                            <span class="detail-value money">${formatMoney(r.cash_grant_amt)}</span>
+                        </div>
+                        ${r.non_cash_amt ? `<div class="detail">
+                            <span class="detail-label">Non-cash</span>
+                            <span class="detail-value money">${formatMoney(r.non_cash_amt)}</span>
+                        </div>` : ''}
+                        <div class="detail">
+                            <span class="detail-label">Tax Year</span>
+                            <span class="detail-value">${r.tax_year || '—'}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Location</span>
+                            <span class="detail-value">${esc([r.recipient_city, r.recipient_state].filter(Boolean).join(', ') || '—')}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Purpose</span>
+                            <span class="detail-value">${esc(truncate(r.purpose, 80) || '—')}</span>
+                        </div>
+                        ${r.irc_section ? `<div class="detail">
+                            <span class="detail-label">IRC Section</span>
+                            <span class="detail-value">${esc(r.irc_section)}</span>
+                        </div>` : ''}
+                    </div>
+                </div>
+                </a>`;
+        }
+
+        function renderDAFCard(r) {
+            return `
+                <a href="https://data.datadawn.org/daf/${r.id}" class="result-card-link" target="_blank">
+                <div class="result-card">
+                    <div class="grant-flow">
+                        <span class="from">${esc(r.funder_name || 'DAF Sponsor')}</span>
+                        <span class="arrow">→</span>
+                        <span class="to">${esc(r.recipient_name || 'Unknown')}</span>
+                    </div>
+                    <div class="card-details">
+                        <div class="detail">
+                            <span class="detail-label">Amount</span>
+                            <span class="detail-value money">${formatMoney(r.amount)}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Year</span>
+                            <span class="detail-value">${r.tax_year || '—'}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Location</span>
+                            <span class="detail-value">${esc([r.recipient_city, r.recipient_state].filter(Boolean).join(', ') || '—')}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Purpose</span>
+                            <span class="detail-value">${esc(truncate(r.purpose, 80) || '—')}</span>
+                        </div>
+                    </div>
+                </div>
+                </a>`;
+        }
+
+        async function runSQL() {
+            const sql = sqlInput.value.trim();
+            if (!sql) return;
+
+            resultsDiv.innerHTML = '<div class="loading"><div class="loading-dots"><span></span><span></span><span></span></div></div>';
+            statusDiv.textContent = '';
+            paginationDiv.style.display = 'none';
+
+            try {
+                const url = `${API}.json?sql=${encodeURIComponent(sql)}&_shape=objects`;
+                const resp = await fetch(url);
+                if (!resp.ok) {
+                    const errData = await resp.json().catch(() => ({}));
+                    throw new Error(errData.error || `HTTP ${resp.status}`);
+                }
+                const data = await resp.json();
+                const rows = data.rows || [];
+
+                if (rows.length === 0) {
+                    resultsDiv.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">∅</div>
+                            <p>Query returned no rows</p>
+                        </div>`;
+                    statusDiv.textContent = '0 rows';
+                    return;
+                }
+
+                statusDiv.innerHTML = `<span class="count">${rows.length}</span> rows returned`;
+
+                // Render as a table
+                const cols = Object.keys(rows[0]);
+                let html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.85rem;">';
+                html += '<thead><tr>' + cols.map(c =>
+                    `<th style="text-align:left;padding:0.6rem 1rem;border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">${esc(c)}</th>`
+                ).join('') + '</tr></thead>';
+                html += '<tbody>' + rows.map(r =>
+                    '<tr>' + cols.map(c => {
+                        let val = r[c];
+                        let style = 'padding:0.5rem 1rem;border-bottom:1px solid var(--border);color:var(--text-secondary);white-space:nowrap;';
+                        if (typeof val === 'number' && Math.abs(val) > 999) {
+                            style += 'font-family:"IBM Plex Mono",monospace;';
+                        }
+                        return `<td style="${style}">${esc(String(val ?? ''))}</td>`;
+                    }).join('') + '</tr>'
+                ).join('') + '</tbody></table></div>';
+                resultsDiv.innerHTML = html;
+
+            } catch (err) {
+                resultsDiv.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">⚠</div>
+                        <p>SQL Error</p>
+                        <div class="hint" style="color:var(--dawn-rose);">${esc(err.message)}</div>
+                    </div>`;
+            }
+        }
+
+        function esc(str) {
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        function truncate(str, len) {
+            if (!str) return '';
+            return str.length > len ? str.slice(0, len) + '…' : str;
+        }
+
+        // Focus search on load
+        searchInput.focus();
+    </script>
+</body>
+</html>

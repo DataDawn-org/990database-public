@@ -1,0 +1,50 @@
+# Data (171 GB XML, 18 GB databases)
+*.db
+*.sqlite
+*.xml
+*.csv
+2017/
+2018/
+2019/
+2020/
+2021/
+2022/
+2023/
+2024/
+2025/
+2026/
+bmf/
+exports/
+.extracted/
+.update_state
+update.log
+
+# Private docs
+CLAUDE.md
+
+# Secrets and credentials
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local config
+.claude/

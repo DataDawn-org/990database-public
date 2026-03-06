@@ -1,0 +1,423 @@
+{% extends "pages/base_datadawn.html" %}
+
+{% block title %}Filing {{ object_id }} — DataDawn{% endblock %}
+
+{% block content %}
+
+{% set filing = sql("SELECT r.object_id, r.ein, r.org_name, r.state, r.tax_year, r.tax_period_end, r.return_type, r.total_revenue, r.total_expenses, r.program_expenses, r.fundraising_expenses, r.management_expenses, r.total_assets_eoy, r.officer_comp, r.contributions_received, r.contributions_paid, r.fmv_assets_eoy, r.net_assets_eoy, r.qualifying_distributions, r.distributable_amount FROM returns r WHERE r.object_id = :object_id LIMIT 1", {"object_id": object_id}, database="990data_public") %}
+
+{% if not filing %}
+
+<div class="not-found">
+  <h1>Filing Not Found</h1>
+  <p>No filing with Object ID {{ object_id }}.</p>
+  <a href="https://datadawn.org/explore">Search for an organization</a>
+</div>
+
+{% else %}
+{% set f = filing[0] %}
+{% set is_pf = f["return_type"] == "990PF" %}
+
+{% set bmf_rows = sql("SELECT b.name FROM bmf b WHERE b.ein = :ein LIMIT 1", {"ein": f["ein"]}, database="990data_public") %}
+{% set org_name = bmf_rows[0]["name"] if bmf_rows else f["org_name"] %}
+
+{% set prev_filing = sql("SELECT r.object_id, r.tax_year, r.return_type FROM returns r WHERE r.ein = :ein AND (r.tax_year > :ty OR (r.tax_year = :ty AND r.object_id > :oid)) ORDER BY r.tax_year ASC, r.object_id ASC LIMIT 1", {"ein": f["ein"], "ty": f["tax_year"], "oid": object_id}, database="990data_public") %}
+{% set next_filing = sql("SELECT r.object_id, r.tax_year, r.return_type FROM returns r WHERE r.ein = :ein AND (r.tax_year < :ty OR (r.tax_year = :ty AND r.object_id < :oid)) ORDER BY r.tax_year DESC, r.object_id DESC LIMIT 1", {"ein": f["ein"], "ty": f["tax_year"], "oid": object_id}, database="990data_public") %}
+
+<div class="page-header">
+  <h1>{{ org_name or "Unknown Organization" }}</h1>
+  <div class="subtitle">
+    <a href="/org/{{ f['ein'] }}" class="ein-badge">{{ f["ein"][:2] }}-{{ f["ein"][2:] }}</a>
+    <span class="ein-badge" style="background: var(--accent); color: #fff; margin-left: 0.5rem;">{{ f["return_type"] }}</span>
+  </div>
+  <div class="meta-row">
+    <div class="meta-item">
+      <div class="meta-label">Tax Year</div>
+      {{ f["tax_year"] or "&mdash;"|safe }}
+    </div>
+    {% if f["tax_period_end"] %}
+    <div class="meta-item">
+      <div class="meta-label">Period End</div>
+      {{ f["tax_period_end"] }}
+    </div>
+    {% endif %}
+    <div class="meta-item">
+      <div class="meta-label">Object ID</div>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem;">{{ object_id }}</span>
+    </div>
+  </div>
+  {% if prev_filing or next_filing %}
+  <div class="filing-nav">
+    {% if prev_filing %}
+    <a href="/filing/{{ prev_filing[0]['object_id'] }}">&larr; {{ prev_filing[0]["tax_year"] }} {{ prev_filing[0]["return_type"] }}</a>
+    {% else %}
+    <span></span>
+    {% endif %}
+    <a href="/org/{{ f['ein'] }}">All filings</a>
+    {% if next_filing %}
+    <a href="/filing/{{ next_filing[0]['object_id'] }}">{{ next_filing[0]["tax_year"] }} {{ next_filing[0]["return_type"] }} &rarr;</a>
+    {% else %}
+    <span></span>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2 class="section-title">Financial Summary</h2>
+  <div class="detail-grid">
+    <div class="detail-item">
+      <div class="detail-label">Revenue</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["total_revenue"]) if f["total_revenue"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Expenses</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["total_expenses"]) if f["total_expenses"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    {% if not is_pf %}
+    <div class="detail-item">
+      <div class="detail-label">Program Expenses</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["program_expenses"]) if f["program_expenses"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Fundraising</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["fundraising_expenses"]) if f["fundraising_expenses"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Management</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["management_expenses"]) if f["management_expenses"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    {% endif %}
+    <div class="detail-item">
+      <div class="detail-label">Total Assets</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["total_assets_eoy"]) if f["total_assets_eoy"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    {% if not is_pf and f["officer_comp"] is not none %}
+    <div class="detail-item">
+      <div class="detail-label">Officer Compensation</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["officer_comp"]) }}</div>
+    </div>
+    {% endif %}
+    {% if is_pf %}
+    <div class="detail-item">
+      <div class="detail-label">Contributions Received</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["contributions_received"]) if f["contributions_received"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Grants Paid</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["contributions_paid"]) if f["contributions_paid"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">FMV Assets</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["fmv_assets_eoy"]) if f["fmv_assets_eoy"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Net Assets</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["net_assets_eoy"]) if f["net_assets_eoy"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Qualifying Distributions</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["qualifying_distributions"]) if f["qualifying_distributions"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    {% if f["distributable_amount"] is not none %}
+    <div class="detail-item">
+      <div class="detail-label">Distributable Amount</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(f["distributable_amount"]) }}</div>
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+</div>
+
+{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.compensation, o.benefits FROM officers o WHERE o.object_id = :object_id ORDER BY o.compensation DESC", {"object_id": object_id}, database="990data_public") %}
+
+{% if officers %}
+<div class="section">
+  <h2 class="section-title">Officers &amp; Directors</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Title</th>
+        <th class="right">Hours/Wk</th>
+        <th class="money">Compensation</th>
+        <th class="money">Benefits</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in officers %}
+      <tr>
+        <td>{{ o["person_name"] or "&mdash;"|safe }}</td>
+        <td>{{ o["title"] or "&mdash;"|safe }}</td>
+        <td class="right">{{ o["avg_hours_per_week"] if o["avg_hours_per_week"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(o["compensation"]) if o["compensation"] is not none and o["compensation"] > 0 else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(o["benefits"]) if o["benefits"] is not none and o["benefits"] > 0 else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set grants_made = sql("SELECT g.id, g.recipient_name, g.recipient_city, g.recipient_state, g.amount, g.purpose FROM grants g WHERE g.object_id = :object_id AND g.grant_type = 'paid' ORDER BY g.amount DESC LIMIT 100", {"object_id": object_id}, database="990data_public") %}
+
+{% if grants_made %}
+<div class="section">
+  <h2 class="section-title">Grants Made (Top 100)</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Recipient</th>
+        <th>Location</th>
+        <th class="money">Amount</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in grants_made %}
+      <tr>
+        <td><a href="/grant/{{ g['id'] }}">{{ g["recipient_name"] or "&mdash;"|safe }}</a></td>
+        <td class="nowrap">{{ [g["recipient_city"], g["recipient_state"]]|select|join(", ") or "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(g["amount"]) if g["amount"] is not none else "&mdash;"|safe }}</td>
+        <td class="purpose">{{ g["purpose"][:120] if g["purpose"] else "&mdash;"|safe }}{% if g["purpose"] and g["purpose"]|length > 120 %}&hellip;{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set sched_i = sql("SELECT si.id, si.recipient_name, si.recipient_ein, si.recipient_city, si.recipient_state, si.cash_grant_amt, si.non_cash_amt, si.purpose FROM schedule_i_990 si WHERE si.object_id = :object_id ORDER BY si.cash_grant_amt DESC LIMIT 100", {"object_id": object_id}, database="990data_public") %}
+
+{% if sched_i %}
+<div class="section">
+  <h2 class="section-title">Schedule I Grants (Top 100)</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Recipient</th>
+        <th>Location</th>
+        <th class="money">Cash Amount</th>
+        <th class="money">Non-Cash</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for si in sched_i %}
+      <tr>
+        <td>
+          {% if si["recipient_ein"] %}
+          <a href="/org/{{ si['recipient_ein'] }}">{{ si["recipient_name"] or "&mdash;"|safe }}</a>
+          {% else %}
+          {{ si["recipient_name"] or "&mdash;"|safe }}
+          {% endif %}
+        </td>
+        <td class="nowrap">{{ [si["recipient_city"], si["recipient_state"]]|select|join(", ") or "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(si["cash_grant_amt"]) if si["cash_grant_amt"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(si["non_cash_amt"]) if si["non_cash_amt"] is not none else "&mdash;"|safe }}</td>
+        <td class="purpose">{{ si["purpose"][:120] if si["purpose"] else "&mdash;"|safe }}{% if si["purpose"] and si["purpose"]|length > 120 %}&hellip;{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set daf_grants = sql("SELECT si.id, si.recipient_name, si.recipient_ein, si.recipient_city, si.recipient_state, si.amount, si.purpose, si.grant_type FROM schedule_i_grants si WHERE si.funder_ein = :ein AND si.tax_year = :ty ORDER BY si.amount DESC LIMIT 100", {"ein": f["ein"], "ty": f["tax_year"]}, database="990data_public") %}
+
+{% if daf_grants %}
+<div class="section">
+  <h2 class="section-title">DAF Disbursements</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Recipient</th>
+        <th>Location</th>
+        <th class="money">Amount</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for dg in daf_grants %}
+      <tr>
+        <td>
+          {% if dg["recipient_ein"] %}
+          <a href="/org/{{ dg['recipient_ein'] }}">{{ dg["recipient_name"] or "&mdash;"|safe }}</a>
+          {% else %}
+          <a href="/daf/{{ dg['id'] }}">{{ dg["recipient_name"] or "&mdash;"|safe }}</a>
+          {% endif %}
+        </td>
+        <td class="nowrap">{{ [dg["recipient_city"], dg["recipient_state"]]|select|join(", ") or "&mdash;"|safe }}</td>
+        <td class="money"><a href="/daf/{{ dg['id'] }}">{{ "${:,.0f}".format(dg["amount"]) if dg["amount"] is not none else "&mdash;"|safe }}</a></td>
+        <td class="purpose">{{ dg["purpose"][:120] if dg["purpose"] else "&mdash;"|safe }}{% if dg["purpose"] and dg["purpose"]|length > 120 %}&hellip;{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set investments = sql("SELECT i.investment_type, i.description, i.book_value, i.fmv, i.cost_basis FROM investments i WHERE i.object_id = :object_id ORDER BY i.fmv DESC", {"object_id": object_id}, database="990data_public") %}
+
+{% if investments %}
+<div class="section">
+  <h2 class="section-title">Investments</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Description</th>
+        <th class="money">Book Value</th>
+        <th class="money">FMV</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inv in investments %}
+      <tr>
+        <td>{{ inv["investment_type"] or "&mdash;"|safe }}</td>
+        <td class="purpose">{{ inv["description"][:100] if inv["description"] else "&mdash;"|safe }}{% if inv["description"] and inv["description"]|length > 100 %}&hellip;{% endif %}</td>
+        <td class="money">{{ "${:,.0f}".format(inv["book_value"]) if inv["book_value"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(inv["fmv"]) if inv["fmv"] is not none else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set cap_gains = sql("SELECT cg.property_desc, cg.how_acquired, cg.acquired_date, cg.sold_date, cg.gross_sale_price, cg.cost_basis, cg.gain_or_loss FROM capital_gains cg WHERE cg.object_id = :object_id ORDER BY cg.gain_or_loss DESC", {"object_id": object_id}, database="990data_public") %}
+
+{% if cap_gains %}
+<div class="section">
+  <h2 class="section-title">Capital Gains &amp; Losses</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Property</th>
+        <th>Acquired</th>
+        <th>Sold</th>
+        <th class="money">Sale Price</th>
+        <th class="money">Cost Basis</th>
+        <th class="money">Gain/Loss</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cg in cap_gains %}
+      <tr>
+        <td class="purpose">{{ cg["property_desc"][:80] if cg["property_desc"] else "&mdash;"|safe }}{% if cg["property_desc"] and cg["property_desc"]|length > 80 %}&hellip;{% endif %}</td>
+        <td class="nowrap">{{ cg["acquired_date"] or "&mdash;"|safe }}</td>
+        <td class="nowrap">{{ cg["sold_date"] or "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(cg["gross_sale_price"]) if cg["gross_sale_price"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(cg["cost_basis"]) if cg["cost_basis"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(cg["gain_or_loss"]) if cg["gain_or_loss"] is not none else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set top_empl = sql("SELECT te.person_name, te.title, te.avg_hours_per_week, te.compensation, te.benefits FROM top_employees te WHERE te.object_id = :object_id ORDER BY te.compensation DESC", {"object_id": object_id}, database="990data_public") %}
+
+{% if top_empl %}
+<div class="section">
+  <h2 class="section-title">Top Employees</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Title</th>
+        <th class="right">Hours/Wk</th>
+        <th class="money">Compensation</th>
+        <th class="money">Benefits</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for te in top_empl %}
+      <tr>
+        <td>{{ te["person_name"] or "&mdash;"|safe }}</td>
+        <td>{{ te["title"] or "&mdash;"|safe }}</td>
+        <td class="right">{{ te["avg_hours_per_week"] if te["avg_hours_per_week"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(te["compensation"]) if te["compensation"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(te["benefits"]) if te["benefits"] is not none else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set contractors_list = sql("SELECT c.contractor_name, c.city, c.state, c.service_type, c.compensation FROM contractors c WHERE c.object_id = :object_id ORDER BY c.compensation DESC", {"object_id": object_id}, database="990data_public") %}
+
+{% if contractors_list %}
+<div class="section">
+  <h2 class="section-title">Contractors</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Contractor</th>
+        <th>Location</th>
+        <th>Service</th>
+        <th class="money">Compensation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in contractors_list %}
+      <tr>
+        <td>{{ c["contractor_name"] or "&mdash;"|safe }}</td>
+        <td class="nowrap">{{ [c["city"], c["state"]]|select|join(", ") or "&mdash;"|safe }}</td>
+        <td class="purpose">{{ c["service_type"][:80] if c["service_type"] else "&mdash;"|safe }}{% if c["service_type"] and c["service_type"]|length > 80 %}&hellip;{% endif %}</td>
+        <td class="money">{{ "${:,.0f}".format(c["compensation"]) if c["compensation"] is not none else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set prog_acts = sql("SELECT pa.activity_num, pa.description, pa.expenses FROM program_activities pa WHERE pa.object_id = :object_id ORDER BY pa.activity_num", {"object_id": object_id}, database="990data_public") %}
+
+{% if prog_acts %}
+<div class="section">
+  <h2 class="section-title">Program Activities</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th class="right">#</th>
+        <th>Description</th>
+        <th class="money">Expenses</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pa in prog_acts %}
+      <tr>
+        <td class="right">{{ pa["activity_num"] or "&mdash;"|safe }}</td>
+        <td class="purpose">{{ pa["description"][:200] if pa["description"] else "&mdash;"|safe }}{% if pa["description"] and pa["description"]|length > 200 %}&hellip;{% endif %}</td>
+        <td class="money">{{ "${:,.0f}".format(pa["expenses"]) if pa["expenses"] is not none else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

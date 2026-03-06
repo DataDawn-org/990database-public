@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BMF Explorer — 990 Data by DataDawn</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Mono:wght@300;400;500&family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --night: #0a0e1a;
+            --deep: #111827;
+            --twilight: #1a2342;
+            --horizon: #2a3a6b;
+            --dawn-amber: #f59e0b;
+            --dawn-gold: #fbbf24;
+            --dawn-light: #fde68a;
+            --dawn-white: #fef3c7;
+            --dawn-rose: #fb923c;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --surface: rgba(255,255,255,0.03);
+            --surface-hover: rgba(255,255,255,0.06);
+            --border: rgba(255,255,255,0.08);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--night);
+            color: var(--text-primary);
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1.5rem 3rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .nav-brand {
+            font-family: 'DM Serif Display', serif;
+            font-size: 1.4rem;
+            color: var(--dawn-gold);
+            text-decoration: none;
+            letter-spacing: 0.02em;
+        }
+
+        .nav-links { display: flex; gap: 2rem; }
+
+        .nav-links a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 400;
+            color: var(--text-muted);
+            text-decoration: none;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover, .nav-links a.active { color: var(--dawn-gold); }
+
+        .search-header {
+            padding: 4rem 3rem 2rem;
+            max-width: 900px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .search-header h1 {
+            font-family: 'DM Serif Display', serif;
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 400;
+            background: linear-gradient(135deg, var(--dawn-light), var(--dawn-amber));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.75rem;
+        }
+
+        .search-header p {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            font-weight: 300;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .search-container {
+            max-width: 800px;
+            margin: 2rem auto 0;
+            padding: 0 3rem;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: var(--deep);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.25rem;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .search-box:focus-within {
+            border-color: rgba(245, 158, 11, 0.4);
+            box-shadow: 0 0 30px rgba(245, 158, 11, 0.08);
+        }
+
+        .search-icon { padding: 0 1rem; color: var(--text-muted); flex-shrink: 0; }
+
+        .search-box input {
+            flex: 1;
+            background: none;
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 300;
+            padding: 1rem 0.5rem;
+        }
+
+        .search-box input::placeholder { color: var(--text-muted); }
+
+        .search-btn {
+            background: linear-gradient(135deg, var(--dawn-amber), var(--dawn-rose));
+            border: none;
+            color: var(--night);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            font-weight: 500;
+            padding: 0.9rem 1.8rem;
+            border-radius: 9px;
+            cursor: pointer;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            transition: opacity 0.2s, transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .search-btn:hover { opacity: 0.9; transform: scale(1.02); }
+
+        /* Filter chips */
+        .filters {
+            display: flex;
+            justify-content: center;
+            gap: 0.25rem;
+            margin: 1.5rem auto 0;
+            max-width: 800px;
+            padding: 0 3rem;
+            flex-wrap: wrap;
+        }
+
+        .chip {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            font-weight: 400;
+            color: var(--text-muted);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 0.6rem 1.2rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            transition: all 0.3s;
+            border-radius: 6px;
+        }
+
+        .chip:hover { color: var(--text-secondary); background: var(--surface-hover); }
+
+        .chip.active {
+            color: var(--dawn-gold);
+            border-color: rgba(245, 158, 11, 0.3);
+            background: rgba(245, 158, 11, 0.06);
+        }
+
+        .examples {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .example-chip {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 0.4rem 0.9rem;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            letter-spacing: 0.03em;
+        }
+
+        .example-chip:hover {
+            color: var(--dawn-gold);
+            border-color: rgba(245, 158, 11, 0.3);
+            background: rgba(245, 158, 11, 0.06);
+        }
+
+        /* Results */
+        .results {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 1.5rem 3rem;
+        }
+
+        .status {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            letter-spacing: 0.05em;
+        }
+
+        .status .count { color: var(--dawn-gold); }
+
+        .result-card {
+            background: var(--deep);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-bottom: 0.75rem;
+            transition: border-color 0.3s, transform 0.2s;
+            cursor: pointer;
+        }
+
+        .result-card:hover {
+            border-color: rgba(245, 158, 11, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .card-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 1.05rem;
+            color: var(--text-primary);
+            line-height: 1.3;
+        }
+
+        .card-meta {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+
+        .meta-item {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            letter-spacing: 0.03em;
+        }
+
+        .meta-item span { color: var(--dawn-gold); }
+
+        /* Subsection badges */
+        .badge-501c3 {
+            display: inline-block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem; font-weight: 500;
+            padding: 0.15rem 0.5rem; border-radius: 3px;
+            background: rgba(34,197,94,0.15); color: #4ade80;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .badge-501c4 {
+            display: inline-block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem; font-weight: 500;
+            padding: 0.15rem 0.5rem; border-radius: 3px;
+            background: rgba(59,130,246,0.15); color: #60a5fa;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .badge-501c6 {
+            display: inline-block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem; font-weight: 500;
+            padding: 0.15rem 0.5rem; border-radius: 3px;
+            background: rgba(168,85,247,0.15); color: #c084fc;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .badge-pf {
+            display: inline-block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem; font-weight: 500;
+            padding: 0.15rem 0.5rem; border-radius: 3px;
+            background: rgba(245,158,11,0.15); color: #fbbf24;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .badge-other {
+            display: inline-block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem; font-weight: 500;
+            padding: 0.15rem 0.5rem; border-radius: 3px;
+            background: rgba(100,116,139,0.2); color: #94a3b8;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+
+        .ntee-badge {
+            display: inline-block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 0.1rem 0.4rem;
+            border-radius: 3px;
+            letter-spacing: 0.03em;
+        }
+
+        .state-badge {
+            display: inline-block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem; font-weight: 500;
+            padding: 0.15rem 0.5rem; border-radius: 3px;
+            background: rgba(245,158,11,0.08); color: var(--dawn-gold);
+            letter-spacing: 0.05em;
+        }
+
+        .money {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--dawn-gold);
+        }
+
+        .load-more {
+            display: block; width: 100%; padding: 0.8rem; margin-top: 1rem;
+            background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+            color: var(--dawn-amber); font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+            cursor: pointer; text-align: center;
+        }
+        .load-more:hover { background: var(--surface-hover); }
+
+        .empty-state { text-align: center; padding: 3rem; color: var(--text-muted); font-size: 0.95rem; font-weight: 300; }
+
+        /* Detail panel */
+        .detail-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 1000;
+        }
+        .detail-overlay.open { display: block; }
+
+        .detail-panel {
+            position: fixed;
+            top: 0; right: 0; bottom: 0;
+            width: min(1400px, 75vw);
+            background: var(--night);
+            border-left: 1px solid var(--border);
+            overflow-y: auto;
+            z-index: 1001;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+        }
+        .detail-panel.open { transform: translateX(0); }
+
+        .detail-close {
+            position: sticky;
+            top: 1.5rem;
+            float: right;
+            margin-right: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            width: 36px; height: 36px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem;
+            transition: all 0.3s;
+            z-index: 10;
+        }
+        .detail-close:hover { color: var(--dawn-gold); border-color: rgba(245,158,11,0.3); }
+
+        .detail-header { padding: 2rem 2rem 1rem; }
+
+        .detail-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 1.4rem;
+            color: var(--text-primary);
+            line-height: 1.3;
+            margin-bottom: 0.5rem;
+        }
+
+        .detail-subtitle {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            letter-spacing: 0.03em;
+        }
+
+        .detail-content { padding: 2rem; }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .detail-item {
+            background: var(--deep);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.8rem;
+        }
+
+        .detail-item .label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .detail-item .value {
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            margin-top: 0.3rem;
+        }
+
+        .detail-item .value.large {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 1.3rem;
+            color: var(--dawn-gold);
+        }
+
+        .section-title {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin: 1.5rem 0 0.75rem;
+        }
+        .section-title:first-child { margin-top: 0; }
+
+        .doc-link { color: var(--dawn-gold); text-decoration: none; }
+        .doc-link:hover { text-decoration: underline; }
+
+        /* Filing cards */
+        .filing-card {
+            background: var(--surface);
+            border-radius: 6px;
+            padding: 0.75rem;
+            margin-bottom: 0.4rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+        .filing-period {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        .filing-revenue {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--dawn-gold);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        thead th {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 0.6rem 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        tbody td {
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        tbody tr:hover { background: var(--surface); }
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 2rem 3rem;
+            text-align: center;
+            margin-top: 5rem;
+        }
+
+        .footer-text {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            letter-spacing: 0.05em;
+        }
+        .footer-text a { color: var(--dawn-amber); text-decoration: none; }
+
+        @media (max-width: 768px) {
+            nav { padding: 1rem 1.5rem; }
+            .nav-links { gap: 1rem; }
+            .nav-links a { font-size: 0.65rem; }
+            .search-header { padding: 3rem 1.5rem 1.5rem; }
+            .search-container { padding: 0 1.5rem; }
+            .filters { padding: 0 1.5rem; }
+            .results { padding: 1rem 1.5rem; }
+            .detail-panel { width: 100vw; }
+            .detail-grid { grid-template-columns: 1fr; }
+            footer { padding: 2rem 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="https://datadawn.org" class="nav-brand">DataDawn</a>
+        <div class="nav-links">
+            <a href="https://datadawn.org/explore.html">Explore</a>
+            <a href="/explore/bmf.html" class="active">BMF</a>
+            <a href="/explore/990.html">990 Filings</a>
+            <a href="/explore/grants.html">Grants</a>
+            <a href="/explore/daf.html">DAF</a>
+            <a href="/990data_public">Raw Database</a>
+            <a href="https://regs.datadawn.org">OpenRegs</a>
+        </div>
+    </nav>
+
+    <div class="search-header">
+        <h1>BMF Explorer</h1>
+        <p>Search the IRS Business Master File &mdash; 1.9 million tax-exempt organizations. Find nonprofits by name, EIN, city, or state. See classifications, assets, income, and filing history.</p>
+    </div>
+
+    <div class="search-container">
+        <div class="search-box">
+            <div class="search-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </div>
+            <input type="text" id="searchInput" placeholder="Search by organization name, EIN, city, or state..." autofocus>
+            <button class="search-btn" onclick="doSearch()">Search</button>
+        </div>
+        <div class="examples" id="examples">
+            <span class="example-chip" onclick="exSearch('Red Cross')">Red Cross</span>
+            <span class="example-chip" onclick="exSearch('Habitat for Humanity')">Habitat for Humanity</span>
+            <span class="example-chip" onclick="exSearch('United Way')">United Way</span>
+            <span class="example-chip" onclick="exSearch('YMCA')">YMCA</span>
+            <span class="example-chip" onclick="exSearch('Sierra Club')">Sierra Club</span>
+        </div>
+    </div>
+
+    <div class="filters" id="filters">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="03">501(c)(3)</button>
+        <button class="chip" data-filter="04">501(c)(4)</button>
+        <button class="chip" data-filter="pf">Private Foundations</button>
+    </div>
+
+    <div class="results" id="results">
+        <div class="empty-state">Search for an organization by name or EIN to explore the IRS Business Master File.</div>
+    </div>
+
+    <div class="detail-overlay" id="detailOverlay" onclick="closeDetail()"></div>
+    <div class="detail-panel" id="detailPanel">
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <div id="detailHeader" class="detail-header"></div>
+        <div class="detail-content" id="detailContent"></div>
+    </div>
+
+    <footer>
+        <div class="footer-text">
+            <a href="https://datadawn.org">DataDawn</a> &mdash; Pure information from public records &mdash; Free forever
+        </div>
+    </footer>
+
+    <script>
+        const API = '/990data_public';
+        let currentFilter = 'all';
+        let currentOffset = 0;
+        const PAGE_SIZE = 30;
+
+        function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+        function sqlEsc(s) { return s ? s.replace(/'/g, "''") : ''; }
+
+        function fmtMoney(n) {
+            if (n == null || n === '') return '—';
+            n = Number(n);
+            if (isNaN(n)) return '—';
+            if (n >= 1e9) return '$' + (n/1e9).toFixed(1) + 'B';
+            if (n >= 1e6) return '$' + (n/1e6).toFixed(1) + 'M';
+            if (n >= 1e3) return '$' + (n/1e3).toFixed(0) + 'K';
+            return '$' + n.toLocaleString();
+        }
+
+        function fmt(n) {
+            if (n == null) return '—';
+            if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+            if (n >= 1e3) return (n/1e3).toFixed(0)+'K';
+            return Number(n).toLocaleString();
+        }
+
+        async function query(sql) {
+            const url = `${API}.json?sql=${encodeURIComponent(sql)}&_shape=objects`;
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`Query failed: ${resp.status}`);
+            const data = await resp.json();
+            return data.rows || [];
+        }
+
+        function getParam(k) { return new URLSearchParams(location.search).get(k); }
+        function setParams(params) {
+            const u = new URLSearchParams(location.search);
+            for (const [k,v] of Object.entries(params)) {
+                if (v === null || v === undefined || v === '') u.delete(k);
+                else u.set(k, v);
+            }
+            history.replaceState(null, '', '?' + u.toString());
+        }
+
+        // Subsection code to display name
+        const SUBSECTIONS = {
+            '01': '501(c)(1)', '02': '501(c)(2)', '03': '501(c)(3)', '04': '501(c)(4)',
+            '05': '501(c)(5)', '06': '501(c)(6)', '07': '501(c)(7)', '08': '501(c)(8)',
+            '09': '501(c)(9)', '10': '501(c)(10)', '11': '501(c)(11)', '12': '501(c)(12)',
+            '13': '501(c)(13)', '14': '501(c)(14)', '15': '501(c)(15)', '16': '501(c)(16)',
+            '17': '501(c)(17)', '18': '501(c)(18)', '19': '501(c)(19)', '20': '501(c)(20)',
+            '21': '501(c)(21)', '22': '501(c)(22)', '23': '501(c)(23)', '24': '501(c)(24)',
+            '25': '501(c)(25)', '26': '501(c)(26)', '27': '501(c)(27)', '28': '501(c)(28)',
+            '29': '501(c)(29)', '40': '501(d)', '50': '501(e)', '60': '501(f)',
+            '70': '501(k)', '71': '501(n)', '80': '521(a)', '81': '527',
+            '90': '4947(a)(2)', '91': '4947(a)(1)'
+        };
+
+        // NTEE major category names
+        const NTEE_CATS = {
+            'A': 'Arts, Culture', 'B': 'Education', 'C': 'Environment', 'D': 'Animal-Related',
+            'E': 'Health Care', 'F': 'Mental Health', 'G': 'Diseases/Disorders', 'H': 'Medical Research',
+            'I': 'Crime/Legal', 'J': 'Employment', 'K': 'Food/Agriculture', 'L': 'Housing/Shelter',
+            'M': 'Public Safety', 'N': 'Recreation/Sports', 'O': 'Youth Development', 'P': 'Human Services',
+            'Q': 'International', 'R': 'Civil Rights', 'S': 'Community Improvement', 'T': 'Philanthropy',
+            'U': 'Science/Technology', 'V': 'Social Science', 'W': 'Public/Society Benefit',
+            'X': 'Religion', 'Y': 'Mutual/Membership', 'Z': 'Unknown'
+        };
+
+        function subsectionBadge(code) {
+            if (!code) return '';
+            const c = String(code).padStart(2, '0');
+            if (c === '03') return '<span class="badge-501c3">501(c)(3)</span>';
+            if (c === '04') return '<span class="badge-501c4">501(c)(4)</span>';
+            if (c === '06') return '<span class="badge-501c6">501(c)(6)</span>';
+            const name = SUBSECTIONS[c] || '501(c)(' + c + ')';
+            return '<span class="badge-other">' + esc(name) + '</span>';
+        }
+
+        function nteeBadge(code) {
+            if (!code) return '';
+            const cat = code.charAt(0).toUpperCase();
+            const name = NTEE_CATS[cat] || '';
+            return `<span class="ntee-badge">${esc(code)}${name ? ' — ' + name : ''}</span>`;
+        }
+
+        function foundationLabel(code) {
+            const labels = {
+                '00': 'Church (170(b)(1)(A)(i))',
+                '10': 'School (170(b)(1)(A)(ii))',
+                '12': 'Hospital (170(b)(1)(A)(iii))',
+                '13': 'Medical research (170(b)(1)(A)(iii))',
+                '14': 'Public charity (170(b)(1)(A)(vi))',
+                '15': 'Public charity (509(a)(1)/170(b)(1)(A)(iv))',
+                '16': 'Public charity (509(a)(2))',
+                '17': 'Public charity (509(a)(3) Type I)',
+                '18': 'Public charity (509(a)(3) Type II)',
+                '19': 'Public charity (509(a)(3) Type III functionally integrated)',
+                '21': 'Public charity (509(a)(3) Type III non-functionally integrated)',
+                '02': 'Private operating foundation',
+                '03': 'Private operating foundation (60% test)',
+                '04': 'Private non-operating foundation'
+            };
+            return labels[String(code).padStart(2, '0')] || '';
+        }
+
+        function exSearch(term) {
+            document.getElementById('searchInput').value = term;
+            doSearch();
+        }
+
+        // Filter chips
+        document.querySelectorAll('.chip').forEach(c => {
+            c.addEventListener('click', () => {
+                document.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+                c.classList.add('active');
+                currentFilter = c.dataset.filter;
+                currentOffset = 0;
+                setParams({ filter: currentFilter === 'all' ? null : currentFilter });
+                doSearch();
+            });
+        });
+
+        document.getElementById('searchInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter') doSearch();
+        });
+
+        function buildFilterWhere() {
+            if (currentFilter === '03') return " AND subsection = '03'";
+            if (currentFilter === '04') return " AND subsection = '04'";
+            if (currentFilter === 'pf') return " AND foundation IN ('02','03','04')";
+            return '';
+        }
+
+        async function doSearch() {
+            const q = document.getElementById('searchInput').value.trim();
+            setParams({ q: q || null, filter: currentFilter === 'all' ? null : currentFilter });
+
+            document.getElementById('examples').style.display = q ? 'none' : 'flex';
+
+            if (!q) {
+                document.getElementById('results').innerHTML = '<div class="empty-state">Search for an organization by name or EIN to explore the IRS Business Master File.</div>';
+                return;
+            }
+
+            document.getElementById('results').innerHTML = '<div class="status">Searching...</div>';
+
+            try {
+                await searchOrgs(q, 0);
+            } catch (e) {
+                document.getElementById('results').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
+            }
+        }
+
+        async function searchOrgs(q, offset) {
+            currentOffset = offset;
+            const filterW = buildFilterWhere();
+
+            // Detect EIN search (9 digits, with or without dash)
+            const einClean = q.replace(/[^0-9]/g, '');
+            let where;
+
+            if (/^\d{9}$/.test(einClean)) {
+                // Exact EIN search
+                where = `ein = '${einClean}'`;
+            } else if (/^\d{2}-?\d{7}$/.test(q.trim())) {
+                where = `ein = '${einClean}'`;
+            } else {
+                // FTS search — try bmf_fts first, fall back to LIKE
+                try {
+                    where = `rowid IN (SELECT rowid FROM bmf_fts WHERE bmf_fts MATCH '"${sqlEsc(q)}"')`;
+                    // Test if FTS works
+                    await query(`SELECT 1 FROM bmf WHERE ${where} LIMIT 1`);
+                } catch (e) {
+                    // FTS not available, fall back to LIKE
+                    where = `name LIKE '%' || '${sqlEsc(q)}' || '%'`;
+                }
+            }
+
+            const sql = `
+                SELECT ein, name, city, state, subsection, ntee_cd,
+                       asset_amt, income_amt, revenue_amt
+                FROM bmf
+                WHERE ${where} ${filterW}
+                ORDER BY asset_amt DESC
+                LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
+            `;
+
+            const rows = await query(sql);
+            const hasMore = rows.length > PAGE_SIZE;
+            if (hasMore) rows.pop();
+
+            if (!rows.length && offset === 0) {
+                document.getElementById('results').innerHTML = '<div class="empty-state">No organizations found. Try a different search term or EIN.</div>';
+                return;
+            }
+
+            let html = '';
+            if (offset === 0) {
+                html += `<div class="status"><span class="count">${rows.length}${hasMore ? '+' : ''}</span> organizations found</div>`;
+            }
+
+            for (const r of rows) {
+                const badge = subsectionBadge(r.subsection);
+                const ntee = r.ntee_cd ? nteeBadge(r.ntee_cd) : '';
+                const loc = [r.city, r.state].filter(Boolean).join(', ');
+                html += `
+                    <div class="result-card" onclick="openOrg('${esc(r.ein)}')">
+                        <div class="card-header">
+                            <div>${badge} ${ntee}</div>
+                            <div class="money">${fmtMoney(r.asset_amt)}</div>
+                        </div>
+                        <div class="card-title">${esc(r.name)}</div>
+                        <div class="card-meta">
+                            <div class="meta-item">EIN <span>${esc(r.ein)}</span></div>
+                            ${loc ? '<div class="meta-item">' + esc(loc) + '</div>' : ''}
+                            ${r.income_amt ? '<div class="meta-item">Income <span>' + fmtMoney(r.income_amt) + '</span></div>' : ''}
+                            ${r.revenue_amt ? '<div class="meta-item">Revenue <span>' + fmtMoney(r.revenue_amt) + '</span></div>' : ''}
+                        </div>
+                    </div>`;
+            }
+
+            if (hasMore) {
+                html += `<button class="load-more" onclick="loadMore(${offset + PAGE_SIZE})">Load more organizations</button>`;
+            }
+
+            if (offset === 0) {
+                document.getElementById('results').innerHTML = html;
+            } else {
+                document.getElementById('results').querySelector('.load-more')?.remove();
+                document.getElementById('results').insertAdjacentHTML('beforeend', html);
+            }
+        }
+
+        async function loadMore(offset) {
+            const q = document.getElementById('searchInput').value.trim();
+            try {
+                await searchOrgs(q, offset);
+            } catch (e) {
+                // silently fail
+            }
+        }
+
+        // Detail panel
+        async function openOrg(ein) {
+            document.getElementById('detailOverlay').classList.add('open');
+            document.getElementById('detailPanel').classList.add('open');
+            document.getElementById('detailContent').innerHTML = '<div class="status">Loading...</div>';
+            setParams({ detail: ein });
+
+            try {
+                const [org] = await query(`SELECT * FROM bmf WHERE ein = '${sqlEsc(ein)}'`);
+                if (!org) {
+                    document.getElementById('detailContent').innerHTML = '<div class="status">Organization not found</div>';
+                    return;
+                }
+
+                const badge = subsectionBadge(org.subsection);
+                const ntee = org.ntee_cd ? nteeBadge(org.ntee_cd) : '';
+                const loc = [org.city, org.state, org.zip].filter(Boolean).join(', ');
+
+                document.getElementById('detailHeader').innerHTML = `
+                    <div style="margin-bottom:0.5rem">${badge} ${ntee}</div>
+                    <div class="detail-title">${esc(org.name)}</div>
+                    <div class="detail-subtitle">
+                        EIN ${esc(org.ein)}${loc ? ' &middot; ' + esc(loc) : ''}
+                    </div>
+                `;
+
+                // Build detail content
+                let html = '<div class="detail-grid">';
+                html += `<div class="detail-item"><div class="label">Assets</div><div class="value large">${fmtMoney(org.asset_amt)}</div></div>`;
+                html += `<div class="detail-item"><div class="label">Income</div><div class="value large">${fmtMoney(org.income_amt)}</div></div>`;
+                html += `<div class="detail-item"><div class="label">Revenue</div><div class="value large">${fmtMoney(org.revenue_amt)}</div></div>`;
+                if (org.ruling) {
+                    const r = String(org.ruling);
+                    const ruling = r.length === 6 ? r.substring(0,4) + '-' + r.substring(4) : r;
+                    html += `<div class="detail-item"><div class="label">Ruling Date</div><div class="value">${esc(ruling)}</div></div>`;
+                }
+                if (org.subsection) {
+                    const subName = SUBSECTIONS[String(org.subsection).padStart(2, '0')] || '501(c)(' + org.subsection + ')';
+                    html += `<div class="detail-item"><div class="label">Subsection</div><div class="value">${esc(subName)}</div></div>`;
+                }
+                if (org.ntee_cd) {
+                    const cat = org.ntee_cd.charAt(0).toUpperCase();
+                    const catName = NTEE_CATS[cat] || '';
+                    html += `<div class="detail-item"><div class="label">NTEE Code</div><div class="value">${esc(org.ntee_cd)}${catName ? ' — ' + catName : ''}</div></div>`;
+                }
+                if (org.foundation !== undefined && org.foundation !== null) {
+                    const fl = foundationLabel(org.foundation);
+                    html += `<div class="detail-item" style="grid-column:span 2"><div class="label">Foundation Type</div><div class="value">${fl ? esc(fl) : esc(org.foundation)}</div></div>`;
+                }
+                if (org.deductibility) {
+                    const dedLabels = {'1': 'Contributions deductible', '2': 'Not deductible', '4': 'Deductibility depends on use'};
+                    html += `<div class="detail-item"><div class="label">Deductibility</div><div class="value">${esc(dedLabels[org.deductibility] || org.deductibility)}</div></div>`;
+                }
+                if (org.status) {
+                    const statLabels = {'01': 'Unconditional Exemption', '02': 'Conditional Exemption', '12': 'Trust (4947(a)(1))', '25': 'Terminated (501(c)(3))'};
+                    html += `<div class="detail-item"><div class="label">Status</div><div class="value">${esc(statLabels[String(org.status).padStart(2,'0')] || org.status)}</div></div>`;
+                }
+                html += '</div>';
+
+                // Try to load filings from returns table
+                html += '<div class="section-title">Recent 990 Filings</div>';
+                try {
+                    const filings = await query(`
+                        SELECT object_id, tax_period_end, tax_year, total_revenue, total_assets_eoy
+                        FROM returns
+                        WHERE ein = '${sqlEsc(ein)}'
+                        ORDER BY tax_period_end DESC
+                        LIMIT 10
+                    `);
+                    if (filings.length) {
+                        html += '<table><thead><tr><th>Tax Year</th><th>Period End</th><th>Revenue</th><th>Assets</th><th></th></tr></thead><tbody>';
+                        for (const f of filings) {
+                            html += `<tr>
+                                <td>${esc(f.tax_year)}</td>
+                                <td>${esc(f.tax_period_end || '')}</td>
+                                <td>${fmtMoney(f.total_revenue)}</td>
+                                <td>${fmtMoney(f.total_assets_eoy)}</td>
+                                <td><a href="/990data_public/returns/${esc(f.object_id)}" target="_blank" class="doc-link">View</a></td>
+                            </tr>`;
+                        }
+                        html += '</tbody></table>';
+                    } else {
+                        html += '<div style="color:var(--text-muted);font-size:0.85rem">No 990 filings found for this EIN.</div>';
+                    }
+                } catch (e) {
+                    html += '<div style="color:var(--text-muted);font-size:0.85rem">Filing data not available.</div>';
+                }
+
+                // Cross-links
+                html += '<div class="section-title">Explore This Organization</div>';
+                html += '<div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:0.5rem">';
+                html += `<a href="/explore/990.html?q=${encodeURIComponent(ein)}" target="_blank" class="doc-link">990 Filings Explorer &rarr;</a>`;
+                html += `<a href="/explore/grants.html?q=${encodeURIComponent(ein)}" target="_blank" class="doc-link">Grants Explorer &rarr;</a>`;
+                html += `<a href="/explore/daf.html?q=${encodeURIComponent(ein)}" target="_blank" class="doc-link">DAF Grants Explorer &rarr;</a>`;
+                html += `<a href="/990data_public/bmf/${esc(ein)}" target="_blank" class="doc-link">Raw BMF Record &rarr;</a>`;
+                html += `<a href="https://projects.propublica.org/nonprofits/organizations/${esc(ein)}" target="_blank" class="doc-link">ProPublica Nonprofit Explorer &rarr;</a>`;
+                html += '</div>';
+
+                document.getElementById('detailContent').innerHTML = html;
+            } catch (e) {
+                document.getElementById('detailContent').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
+            }
+        }
+
+        function closeDetail() {
+            document.getElementById('detailOverlay').classList.remove('open');
+            document.getElementById('detailPanel').classList.remove('open');
+            setParams({ detail: null });
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeDetail();
+        });
+
+        // Init from URL state
+        (function init() {
+            const q = getParam('q');
+            const filter = getParam('filter');
+            const detail = getParam('detail');
+
+            if (filter) {
+                currentFilter = filter;
+                document.querySelectorAll('.chip').forEach(c => {
+                    c.classList.toggle('active', c.dataset.filter === filter);
+                });
+            }
+
+            if (q) {
+                document.getElementById('searchInput').value = q;
+                doSearch();
+            }
+
+            if (detail) {
+                openOrg(detail);
+            }
+        })();
+    </script>
+</body>
+</html>

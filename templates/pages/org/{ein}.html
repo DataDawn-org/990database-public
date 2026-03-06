@@ -1,0 +1,370 @@
+{% extends "pages/base_datadawn.html" %}
+
+{% block title %}{{ org_name or "Organization" }} — DataDawn{% endblock %}
+
+{% block content %}
+
+{% set bmf_rows = sql("SELECT b.ein, b.name, b.city, b.state, b.zip, b.ntee_cd, b.subsection, b.ruling, b.foundation, b.asset_amt, b.income_amt FROM bmf b WHERE b.ein = :ein LIMIT 1", {"ein": ein}, database="990data_public") %}
+
+{% set filings = sql("SELECT r.object_id, r.ein, r.org_name, r.state, r.tax_year, r.tax_period_end, r.return_type, r.total_revenue, r.total_expenses, r.program_expenses, r.fundraising_expenses, r.management_expenses, r.total_assets_eoy, r.officer_comp, r.ntee_code, r.contributions_received, r.contributions_paid, r.fmv_assets_eoy, r.net_assets_eoy, r.qualifying_distributions FROM returns r WHERE r.ein = :ein ORDER BY r.tax_year DESC, r.object_id DESC", {"ein": ein}, database="990data_public") %}
+
+{% if not bmf_rows and not filings %}
+
+<div class="not-found">
+  <h1>Organization Not Found</h1>
+  <p>No records found for EIN {{ ein }}.</p>
+  <a href="https://datadawn.org/explore">Search for an organization</a>
+</div>
+
+{% else %}
+
+{% set timeline = sql("SELECT sub.tax_year, sub.return_type, sub.total_revenue, sub.total_expenses, sub.program_expenses, sub.total_assets_eoy, sub.officer_comp, sub.object_id FROM (SELECT r.tax_year, r.return_type, r.total_revenue, r.total_expenses, r.program_expenses, r.total_assets_eoy, r.officer_comp, r.object_id, ROW_NUMBER() OVER (PARTITION BY r.tax_year ORDER BY r.object_id DESC) AS rn FROM returns r WHERE r.ein = :ein AND r.return_type IN ('990', '990EZ')) sub WHERE sub.rn = 1 ORDER BY sub.tax_year DESC", {"ein": ein}, database="990data_public") %}
+
+{% set pf_timeline = sql("SELECT sub.tax_year, sub.total_revenue, sub.total_expenses, sub.contributions_received, sub.contributions_paid, sub.fmv_assets_eoy, sub.net_assets_eoy, sub.qualifying_distributions, sub.total_assets_eoy, sub.object_id FROM (SELECT r.tax_year, r.total_revenue, r.total_expenses, r.contributions_received, r.contributions_paid, r.fmv_assets_eoy, r.net_assets_eoy, r.qualifying_distributions, r.total_assets_eoy, r.object_id, ROW_NUMBER() OVER (PARTITION BY r.tax_year ORDER BY r.object_id DESC) AS rn FROM returns r WHERE r.ein = :ein AND r.return_type = '990PF') sub WHERE sub.rn = 1 ORDER BY sub.tax_year DESC", {"ein": ein}, database="990data_public") %}
+
+{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.compensation, o.benefits FROM officers o WHERE o.object_id = (SELECT r.object_id FROM returns r WHERE r.ein = :ein ORDER BY r.tax_year DESC, r.object_id DESC LIMIT 1) ORDER BY o.compensation DESC LIMIT 25", {"ein": ein}, database="990data_public") %}
+
+{% set grants_made = sql("SELECT g.id, g.recipient_name, g.recipient_city, g.recipient_state, g.amount, g.purpose, g.grant_date, g.grant_type, r2.tax_year FROM grants g LEFT JOIN returns r2 ON r2.object_id = g.object_id WHERE g.ein = :ein AND g.grant_type = 'paid' ORDER BY g.amount DESC LIMIT 100", {"ein": ein}, database="990data_public") %}
+
+{% set org_name_for_match = bmf_rows[0]["name"] if bmf_rows else filings[0]["org_name"] %}
+{% set org_fts_query = '"' + (org_name_for_match|replace('"', '')) + '"' if org_name_for_match else '' %}
+
+{% set pf_grants_received = sql("SELECT g.id, g.ein AS funder_ein, b.name AS funder_name, g.amount, g.purpose, g.grant_date, g.recipient_name, r2.tax_year FROM fts_grants ft JOIN grants g ON g.id = ft.rowid LEFT JOIN returns r2 ON r2.object_id = g.object_id LEFT JOIN bmf b ON b.ein = g.ein WHERE ft.recipient_name MATCH :org_fts AND g.grant_type = 'paid' ORDER BY g.amount DESC LIMIT 100", {"org_fts": org_fts_query}, database="990data_public") if org_fts_query else [] %}
+
+{% set grants_received = sql("SELECT si.id, si.ein AS funder_ein, b.name AS funder_name, si.recipient_ein, r2.tax_year, si.cash_grant_amt, si.purpose FROM schedule_i_990 si LEFT JOIN returns r2 ON r2.object_id = si.object_id LEFT JOIN bmf b ON b.ein = si.ein WHERE si.recipient_ein = :ein ORDER BY si.cash_grant_amt DESC LIMIT 50", {"ein": ein}, database="990data_public") %}
+
+{% set related = sql("SELECT DISTINCT ro.related_org_name, ro.related_ein, ro.city, ro.state, ro.primary_activity, ro.section, ro.exempt_code_section FROM related_orgs ro WHERE ro.ein = :ein LIMIT 30", {"ein": ein}, database="990data_public") %}
+
+{% set org_name = bmf_rows[0]["name"] if bmf_rows else (filings[0]["org_name"] if filings else "Unknown Organization") %}
+{% set org_state = bmf_rows[0]["state"] if bmf_rows else (filings[0]["state"] if filings else "") %}
+{% set org_ntee = bmf_rows[0]["ntee_cd"] if bmf_rows else "" %}
+
+<div class="page-header">
+  <h1>{{ org_name }}</h1>
+  <div class="subtitle">
+    <span class="ein-badge">{{ ein[:2] }}-{{ ein[2:] }}</span>
+  </div>
+  <div class="meta-row">
+    {% if org_state %}
+    <div class="meta-item">
+      <div class="meta-label">State</div>
+      {{ org_state }}
+    </div>
+    {% endif %}
+    {% if org_ntee %}
+    <div class="meta-item">
+      <div class="meta-label">NTEE Code</div>
+      {{ org_ntee }}
+    </div>
+    {% endif %}
+    {% if bmf_rows and bmf_rows[0]["subsection"] %}
+    <div class="meta-item">
+      <div class="meta-label">IRC Section</div>
+      501(c)({{ bmf_rows[0]["subsection"] }})
+    </div>
+    {% endif %}
+    {% if filings %}
+    <div class="meta-item">
+      <div class="meta-label">Filings</div>
+      {{ filings|length }} on record
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if timeline %}
+<div class="section">
+  <h2 class="section-title">Financial Timeline</h2>
+  {% set tl = timeline|reverse|list %}
+  {% if tl|length > 1 %}
+  {% set ns = namespace(max_val=1) %}
+  {% for row in tl %}
+    {% if row["total_revenue"] is not none and row["total_revenue"] > ns.max_val %}{% set ns.max_val = row["total_revenue"] %}{% endif %}
+    {% if row["total_expenses"] is not none and row["total_expenses"] > ns.max_val %}{% set ns.max_val = row["total_expenses"] %}{% endif %}
+    {% if row["total_assets_eoy"] is not none and row["total_assets_eoy"] > ns.max_val %}{% set ns.max_val = row["total_assets_eoy"] %}{% endif %}
+  {% endfor %}
+  {% set step_x = 280.0 / (tl|length - 1) %}
+  <div class="sparkline-wrap">
+    <svg viewBox="0 0 300 80" class="sparkline-svg" preserveAspectRatio="none">
+      <polyline class="spark-line spark-revenue" points="{% for row in tl %}{{ (10 + loop.index0 * step_x)|round(1) }},{{ (75 - (row['total_revenue'] or 0) / ns.max_val * 65)|round(1) }}{% if not loop.last %} {% endif %}{% endfor %}" />
+      <polyline class="spark-line spark-expenses" points="{% for row in tl %}{{ (10 + loop.index0 * step_x)|round(1) }},{{ (75 - (row['total_expenses'] or 0) / ns.max_val * 65)|round(1) }}{% if not loop.last %} {% endif %}{% endfor %}" />
+      <polyline class="spark-line spark-assets" points="{% for row in tl %}{{ (10 + loop.index0 * step_x)|round(1) }},{{ (75 - (row['total_assets_eoy'] or 0) / ns.max_val * 65)|round(1) }}{% if not loop.last %} {% endif %}{% endfor %}" />
+    </svg>
+    <div class="spark-legend">
+      <span class="spark-key"><span class="spark-dot" style="background: var(--dawn-amber);"></span>Revenue</span>
+      <span class="spark-key"><span class="spark-dot" style="background: var(--dawn-rose);"></span>Expenses</span>
+      <span class="spark-key"><span class="spark-dot" style="background: var(--text-muted);"></span>Assets</span>
+    </div>
+  </div>
+  {% endif %}
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Year</th>
+        <th>Form</th>
+        <th class="money">Revenue</th>
+        <th class="money">Expenses</th>
+        <th class="money">Program</th>
+        <th class="money">Assets</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in timeline %}
+      <tr>
+        <td class="nowrap"><a href="/filing/{{ row['object_id'] }}">{{ row["tax_year"] }}</a></td>
+        <td>{{ row["return_type"] }}</td>
+        <td class="money">{{ "${:,.0f}".format(row["total_revenue"]) if row["total_revenue"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(row["total_expenses"]) if row["total_expenses"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(row["program_expenses"]) if row["program_expenses"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(row["total_assets_eoy"]) if row["total_assets_eoy"] is not none else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if pf_timeline %}
+<div class="section">
+  <h2 class="section-title">Foundation Financial Timeline</h2>
+  {% set ptl = pf_timeline|reverse|list %}
+  {% if ptl|length > 1 %}
+  {% set pns = namespace(max_val=1) %}
+  {% for row in ptl %}
+    {% if row["contributions_received"] is not none and row["contributions_received"] > pns.max_val %}{% set pns.max_val = row["contributions_received"] %}{% endif %}
+    {% if row["contributions_paid"] is not none and row["contributions_paid"] > pns.max_val %}{% set pns.max_val = row["contributions_paid"] %}{% endif %}
+    {% if row["fmv_assets_eoy"] is not none and row["fmv_assets_eoy"] > pns.max_val %}{% set pns.max_val = row["fmv_assets_eoy"] %}{% endif %}
+  {% endfor %}
+  {% set pf_step_x = 280.0 / (ptl|length - 1) %}
+  <div class="sparkline-wrap">
+    <svg viewBox="0 0 300 80" class="sparkline-svg" preserveAspectRatio="none">
+      <polyline class="spark-line spark-revenue" points="{% for row in ptl %}{{ (10 + loop.index0 * pf_step_x)|round(1) }},{{ (75 - (row['contributions_received'] or 0) / pns.max_val * 65)|round(1) }}{% if not loop.last %} {% endif %}{% endfor %}" />
+      <polyline class="spark-line spark-expenses" points="{% for row in ptl %}{{ (10 + loop.index0 * pf_step_x)|round(1) }},{{ (75 - (row['contributions_paid'] or 0) / pns.max_val * 65)|round(1) }}{% if not loop.last %} {% endif %}{% endfor %}" />
+      <polyline class="spark-line spark-assets" points="{% for row in ptl %}{{ (10 + loop.index0 * pf_step_x)|round(1) }},{{ (75 - (row['fmv_assets_eoy'] or 0) / pns.max_val * 65)|round(1) }}{% if not loop.last %} {% endif %}{% endfor %}" />
+    </svg>
+    <div class="spark-legend">
+      <span class="spark-key"><span class="spark-dot" style="background: var(--dawn-amber);"></span>Contributions In</span>
+      <span class="spark-key"><span class="spark-dot" style="background: var(--dawn-rose);"></span>Grants Paid</span>
+      <span class="spark-key"><span class="spark-dot" style="background: var(--text-muted);"></span>FMV Assets</span>
+    </div>
+  </div>
+  {% endif %}
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Year</th>
+        <th class="money">Revenue</th>
+        <th class="money">Contributions Received</th>
+        <th class="money">Grants Paid</th>
+        <th class="money">FMV Assets</th>
+        <th class="money">Qualifying Dist.</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in pf_timeline %}
+      <tr>
+        <td class="nowrap"><a href="/filing/{{ row['object_id'] }}">{{ row["tax_year"] }}</a></td>
+        <td class="money">{{ "${:,.0f}".format(row["total_revenue"]) if row["total_revenue"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(row["contributions_received"]) if row["contributions_received"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(row["contributions_paid"]) if row["contributions_paid"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(row["fmv_assets_eoy"]) if row["fmv_assets_eoy"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(row["qualifying_distributions"]) if row["qualifying_distributions"] is not none else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if officers %}
+<div class="section">
+  <h2 class="section-title">Officers &amp; Directors</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Title</th>
+        <th class="right">Hours/Wk</th>
+        <th class="money">Compensation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in officers %}
+      <tr>
+        <td>{{ o["person_name"] or "&mdash;"|safe }}</td>
+        <td>{{ o["title"] or "&mdash;"|safe }}</td>
+        <td class="right">{{ o["avg_hours_per_week"] if o["avg_hours_per_week"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(o["compensation"]) if o["compensation"] is not none and o["compensation"] > 0 else "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if grants_made %}
+<div class="section">
+  <h2 class="section-title">Foundation Grants Made (Top 100)</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Recipient</th>
+        <th>Location</th>
+        <th class="money">Amount</th>
+        <th>Purpose</th>
+        <th>Year</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in grants_made %}
+      <tr>
+        <td><a href="/grant/{{ g['id'] }}">{{ g["recipient_name"] or "&mdash;"|safe }}</a></td>
+        <td class="nowrap">{{ [g["recipient_city"], g["recipient_state"]]|select|join(", ") or "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(g["amount"]) if g["amount"] is not none else "&mdash;"|safe }}</td>
+        <td class="purpose">{{ g["purpose"][:120] if g["purpose"] else "&mdash;"|safe }}{% if g["purpose"] and g["purpose"]|length > 120 %}&hellip;{% endif %}</td>
+        <td class="nowrap">{{ g["tax_year"] or "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if pf_grants_received %}
+<div class="section">
+  <h2 class="section-title">Foundation Grants Received (Top 50)</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Funder</th>
+        <th class="money">Amount</th>
+        <th>Purpose</th>
+        <th>Year</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in pf_grants_received %}
+      <tr>
+        <td><a href="/org/{{ g['funder_ein'] }}">{{ g["funder_name"] or g["funder_ein"] }}</a></td>
+        <td class="money"><a href="/grant/{{ g['id'] }}">{{ "${:,.0f}".format(g["amount"]) if g["amount"] is not none else "&mdash;"|safe }}</a></td>
+        <td class="purpose">{{ g["purpose"][:120] if g["purpose"] else "&mdash;"|safe }}{% if g["purpose"] and g["purpose"]|length > 120 %}&hellip;{% endif %}</td>
+        <td class="nowrap">{{ g["tax_year"] or "&mdash;"|safe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if grants_received %}
+<div class="section">
+  <h2 class="section-title">Schedule I Grants Received (Top 50)</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Funder</th>
+        <th>Year</th>
+        <th class="money">Amount</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in grants_received %}
+      <tr>
+        <td>
+          {% if g["funder_ein"] %}
+          <a href="/org/{{ g['funder_ein'] }}">{{ g["funder_name"] or g["funder_ein"] }}</a>
+          {% else %}
+          {{ g["funder_name"] or "&mdash;"|safe }}
+          {% endif %}
+        </td>
+        <td>{{ g["tax_year"] or "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(g["cash_grant_amt"]) if g["cash_grant_amt"] is not none else "&mdash;"|safe }}</td>
+        <td class="purpose">{{ g["purpose"][:120] if g["purpose"] else "&mdash;"|safe }}{% if g["purpose"] and g["purpose"]|length > 120 %}&hellip;{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if related %}
+<div class="section">
+  <h2 class="section-title">Related Organizations</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Organization</th>
+        <th>EIN</th>
+        <th>Type</th>
+        <th>Activity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in related %}
+      <tr>
+        <td>{{ r["related_org_name"] or "&mdash;"|safe }}</td>
+        <td>
+          {% if r["related_ein"] %}
+          <a href="/org/{{ r['related_ein'] }}">{{ r["related_ein"][:2] }}-{{ r["related_ein"][2:] }}</a>
+          {% else %}
+          &mdash;
+          {% endif %}
+        </td>
+        <td>{{ r["section"] or "&mdash;"|safe }}</td>
+        <td class="purpose">{{ r["primary_activity"][:100] if r["primary_activity"] else "&mdash;"|safe }}{% if r["primary_activity"] and r["primary_activity"]|length > 100 %}&hellip;{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if filings %}
+<div class="section">
+  <h2 class="section-title">All Filings</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Tax Year</th>
+        <th>Form</th>
+        <th>Period End</th>
+        <th class="money">Revenue</th>
+        <th class="money">Expenses</th>
+        <th>Object ID</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in filings %}
+      <tr>
+        <td><a href="/filing/{{ f['object_id'] }}">{{ f["tax_year"] or "&mdash;"|safe }}</a></td>
+        <td>{{ f["return_type"] or "&mdash;"|safe }}</td>
+        <td class="nowrap">{{ f["tax_period_end"] or "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(f["total_revenue"]) if f["total_revenue"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(f["total_expenses"]) if f["total_expenses"] is not none else "&mdash;"|safe }}</td>
+        <td class="nowrap" style="font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem;"><a href="/filing/{{ f['object_id'] }}">{{ f["object_id"] }}</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

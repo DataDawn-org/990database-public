@@ -1,0 +1,179 @@
+{% extends "pages/base_datadawn.html" %}
+
+{% block title %}Grant Detail — DataDawn{% endblock %}
+
+{% block content %}
+
+{% set grant_rows = sql("SELECT g.id, g.object_id, g.ein, g.grant_type, g.recipient_name, g.recipient_city, g.recipient_state, g.recipient_country, g.recipient_zip, g.relationship, g.foundation_status, g.purpose, g.amount, g.grant_date, g.expended_amount, b.name AS funder_name, r2.tax_year AS filing_tax_year, r2.return_type AS filing_return_type, r2.contributions_paid AS filing_contributions_paid FROM grants g LEFT JOIN returns r2 ON r2.object_id = g.object_id LEFT JOIN bmf b ON b.ein = g.ein WHERE g.id = :id LIMIT 1", {"id": id}, database="990data_public") %}
+
+{% if not grant_rows %}
+
+<div class="not-found">
+  <h1>Grant Not Found</h1>
+  <p>No grant record with ID {{ id }}.</p>
+  <a href="https://datadawn.org/explore">Search for grants</a>
+</div>
+
+{% else %}
+{% set g = grant_rows[0] %}
+{% set funder_name = g["funder_name"] or g["ein"] %}
+
+{% set history = sql("SELECT g2.id, g2.amount, g2.grant_date, g2.purpose, g2.grant_type, r2.tax_year FROM grants g2 LEFT JOIN returns r2 ON r2.object_id = g2.object_id WHERE g2.ein = :funder_ein AND g2.recipient_name = :recip_name COLLATE NOCASE AND g2.id != :grant_id ORDER BY r2.tax_year DESC, g2.amount DESC LIMIT 20", {"funder_ein": g["ein"], "recip_name": g["recipient_name"], "grant_id": g["id"]}, database="990data_public") %}
+
+{% set other_funders = sql("SELECT g3.ein, b.name AS funder_name, SUM(g3.amount) AS total, COUNT(*) AS num_grants FROM grants g3 LEFT JOIN bmf b ON b.ein = g3.ein WHERE g3.recipient_name = :recip_name COLLATE NOCASE AND g3.ein != :funder_ein AND g3.grant_type = 'paid' GROUP BY g3.ein ORDER BY total DESC LIMIT 20", {"recip_name": g["recipient_name"], "funder_ein": g["ein"]}, database="990data_public") %}
+
+{% set recipient_org = sql("SELECT b.ein, b.name FROM bmf b WHERE b.name = :recip_name COLLATE NOCASE LIMIT 1", {"recip_name": g["recipient_name"]}, database="990data_public") if g["recipient_name"] else [] %}
+
+<div class="page-header">
+  <div class="grant-flow-header">
+    <span class="flow-entity"><a href="/org/{{ g['ein'] }}">{{ funder_name }}</a></span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-entity">
+      {% if recipient_org %}
+      <a href="/org/{{ recipient_org[0]['ein'] }}">{{ g["recipient_name"] }}</a>
+      {% else %}
+      {{ g["recipient_name"] or "Unknown Recipient" }}
+      {% endif %}
+    </span>
+  </div>
+  <div class="grant-amount-hero">{{ "${:,.0f}".format(g["amount"]) if g["amount"] is not none else "$0" }}</div>
+  <div class="subtitle">Foundation Grant #{{ g["id"] }}</div>
+</div>
+
+<div class="section">
+  <h2 class="section-title">Grant Details</h2>
+  <div class="detail-grid">
+    <div class="detail-item">
+      <div class="detail-label">Amount</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(g["amount"]) if g["amount"] is not none else "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Date</div>
+      <div class="detail-value">{{ g["grant_date"] or "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Type</div>
+      <div class="detail-value">{{ g["grant_type"] or "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Location</div>
+      <div class="detail-value">{{ [g["recipient_city"], g["recipient_state"], g["recipient_country"]]|select|join(", ") or "&mdash;"|safe }}</div>
+    </div>
+    {% if g["foundation_status"] %}
+    <div class="detail-item">
+      <div class="detail-label">Foundation Status</div>
+      <div class="detail-value">{{ g["foundation_status"] }}</div>
+    </div>
+    {% endif %}
+    {% if g["relationship"] %}
+    <div class="detail-item">
+      <div class="detail-label">Relationship</div>
+      <div class="detail-value">{{ g["relationship"] }}</div>
+    </div>
+    {% endif %}
+    {% if g["expended_amount"] is not none %}
+    <div class="detail-item">
+      <div class="detail-label">Expended</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(g["expended_amount"]) }}</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if g["purpose"] %}
+<div class="section">
+  <h2 class="section-title">Purpose</h2>
+  <p style="color: var(--text-secondary); line-height: 1.7;">{{ g["purpose"] }}</p>
+</div>
+{% endif %}
+
+<div class="section">
+  <h2 class="section-title">Filing Context</h2>
+  <div class="detail-grid">
+    <div class="detail-item">
+      <div class="detail-label">Funder</div>
+      <div class="detail-value"><a href="/org/{{ g['ein'] }}">{{ funder_name }}</a></div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Tax Year</div>
+      <div class="detail-value">{{ g["filing_tax_year"] or "&mdash;"|safe }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">Form Type</div>
+      <div class="detail-value">{{ g["filing_return_type"] or "&mdash;"|safe }}</div>
+    </div>
+    {% if g["filing_contributions_paid"] is not none %}
+    <div class="detail-item">
+      <div class="detail-label">Funder Total Giving (Year)</div>
+      <div class="detail-value money">{{ "${:,.0f}".format(g["filing_contributions_paid"]) }}</div>
+    </div>
+    {% endif %}
+    {% if recipient_org %}
+    <div class="detail-item">
+      <div class="detail-label">Recipient Org</div>
+      <div class="detail-value"><a href="/org/{{ recipient_org[0]['ein'] }}">{{ recipient_org[0]["name"] }}</a></div>
+    </div>
+    {% endif %}
+    <div class="detail-item">
+      <div class="detail-label">Filing</div>
+      <div class="detail-value"><a href="/filing/{{ g['object_id'] }}">View full filing</a></div>
+    </div>
+  </div>
+</div>
+
+{% if history %}
+<div class="section">
+  <h2 class="section-title">Other Grants: {{ funder_name }} &rarr; {{ g["recipient_name"] }}</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th class="money">Amount</th>
+        <th>Year</th>
+        <th>Type</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in history %}
+      <tr>
+        <td class="money"><a href="/grant/{{ h['id'] }}">{{ "${:,.0f}".format(h["amount"]) if h["amount"] is not none else "$0" }}</a></td>
+        <td class="nowrap">{{ h["tax_year"] or "&mdash;"|safe }}</td>
+        <td>{{ h["grant_type"] or "&mdash;"|safe }}</td>
+        <td class="purpose">{{ h["purpose"][:100] if h["purpose"] else "&mdash;"|safe }}{% if h["purpose"] and h["purpose"]|length > 100 %}&hellip;{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if other_funders %}
+<div class="section">
+  <h2 class="section-title">Other Funders of {{ g["recipient_name"] }}</h2>
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Funder</th>
+        <th class="money">Total Grants</th>
+        <th class="right"># Grants</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for of in other_funders %}
+      <tr>
+        <td><a href="/org/{{ of['ein'] }}">{{ of["funder_name"] or of["ein"] }}</a></td>
+        <td class="money">{{ "${:,.0f}".format(of["total"]) if of["total"] is not none else "$0" }}</td>
+        <td class="right">{{ of["num_grants"] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}DataDawn{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/datadawn.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <nav>
+    <a class="nav-brand" href="https://datadawn.org">DataDawn</a>
+    <div class="nav-links">
+      <a href="https://datadawn.org">Home</a>
+      <a href="https://datadawn.org/explore">Explore</a>
+      <a href="/">Raw Database</a>
+    </div>
+  </nav>
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+  <footer>
+    <div>DataDawn &mdash; Pure information from public records &mdash; Free forever</div>
+  </footer>
+</body>
+</html>
