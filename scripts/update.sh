@@ -26,7 +26,8 @@ LOG_FILE="$PROJECT_DIR/update.log"
 EXTRACTED_DIR="$PROJECT_DIR/.extracted"
 IRS_BASE_URL="https://apps.irs.gov/pub/epostcard/990/xml"
 REMOTE_HOST="${DATADAWN_REMOTE_HOST:?Set DATADAWN_REMOTE_HOST (e.g. user@your-server)}"
-REMOTE_DB_PATH="/opt/datasette/990data_public.db"
+REMOTE_INSTALL_DIR="${DATADAWN_REMOTE_DIR:?Set DATADAWN_REMOTE_DIR (e.g. /opt/datasette)}"
+REMOTE_DB_PATH="$REMOTE_INSTALL_DIR/990data_public.db"
 
 EXTRACT_CORE="$PROJECT_DIR/extract_990.py"
 EXTRACT_PF="$PROJECT_DIR/extract_990pf_detail.py"
@@ -117,7 +118,7 @@ mkdir -p "$EXTRACTED_DIR"
 log "--- Step 0: Git backup of current server state ---"
 if ! dry "Would commit current server state to git"; then
     BACKUP_MSG="Pre-update backup: $(date '+%Y-%m-%d %H:%M:%S')"
-    ssh "$REMOTE_HOST" "cd /opt/datasette && git add -A && { git diff --cached --quiet && echo 'No changes to backup' || { git commit -m \"$BACKUP_MSG\" && git push origin main; }; }" 2>>"$LOG_FILE"
+    ssh "$REMOTE_HOST" "cd $REMOTE_INSTALL_DIR && git add -A && { git diff --cached --quiet && echo 'No changes to backup' || { git commit -m \"$BACKUP_MSG\" && git push origin main; }; }" 2>>"$LOG_FILE"
     log "Git backup complete"
 fi
 
@@ -401,20 +402,20 @@ else
 
     # Deploy detail page templates and static assets
     log "Deploying templates and static assets..."
-    ssh "$REMOTE_HOST" 'mkdir -p /opt/datasette/templates/pages/org /opt/datasette/templates/pages/grant /opt/datasette/templates/pages/daf /opt/datasette/templates/pages/filing /opt/datasette/static'
-    scp "$PROJECT_DIR/templates/pages/base_datadawn.html" "$REMOTE_HOST:/opt/datasette/templates/pages/base_datadawn.html"
-    scp "$PROJECT_DIR/templates/pages/org/{ein}.html" "$REMOTE_HOST:/opt/datasette/templates/pages/org/{ein}.html"
-    scp "$PROJECT_DIR/templates/pages/grant/{id}.html" "$REMOTE_HOST:/opt/datasette/templates/pages/grant/{id}.html"
-    scp "$PROJECT_DIR/templates/pages/daf/{id}.html" "$REMOTE_HOST:/opt/datasette/templates/pages/daf/{id}.html"
-    scp "$PROJECT_DIR/templates/pages/filing/{object_id}.html" "$REMOTE_HOST:/opt/datasette/templates/pages/filing/{object_id}.html"
-    scp "$PROJECT_DIR/static/datadawn.css" "$REMOTE_HOST:/opt/datasette/static/datadawn.css"
+    ssh "$REMOTE_HOST" "mkdir -p $REMOTE_INSTALL_DIR/templates/pages/org $REMOTE_INSTALL_DIR/templates/pages/grant $REMOTE_INSTALL_DIR/templates/pages/daf $REMOTE_INSTALL_DIR/templates/pages/filing $REMOTE_INSTALL_DIR/static"
+    scp "$PROJECT_DIR/templates/pages/base_datadawn.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/base_datadawn.html"
+    scp "$PROJECT_DIR/templates/pages/org/{ein}.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/org/{ein}.html"
+    scp "$PROJECT_DIR/templates/pages/grant/{id}.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/grant/{id}.html"
+    scp "$PROJECT_DIR/templates/pages/daf/{id}.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/daf/{id}.html"
+    scp "$PROJECT_DIR/templates/pages/filing/{object_id}.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/filing/{object_id}.html"
+    scp "$PROJECT_DIR/static/datadawn.css" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/static/datadawn.css"
     # Deploy explore pages
-    ssh "$REMOTE_HOST" 'mkdir -p /opt/datasette/explore'
-    scp -rq "$PROJECT_DIR/explore/"* "$REMOTE_HOST:/opt/datasette/explore/"
+    ssh "$REMOTE_HOST" "mkdir -p $REMOTE_INSTALL_DIR/explore"
+    scp -rq "$PROJECT_DIR/explore/"* "$REMOTE_HOST:$REMOTE_INSTALL_DIR/explore/"
     log "Explore pages deployed"
     # Deploy performance plugin
-    ssh "$REMOTE_HOST" 'mkdir -p /opt/datasette/plugins'
-    scp "$PROJECT_DIR/plugins/performance.py" "$REMOTE_HOST:/opt/datasette/plugins/performance.py"
+    ssh "$REMOTE_HOST" "mkdir -p $REMOTE_INSTALL_DIR/plugins"
+    scp "$PROJECT_DIR/plugins/performance.py" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/plugins/performance.py"
     log "Templates, static assets, and plugins deployed"
 
     # Update metadata.json with current stats
@@ -436,7 +437,7 @@ else
     O_FMT=$(echo "" | fmt "$OFFICERS_COUNT")
     RE_FMT=$(echo "" | fmt "$RELATED_COUNT")
 
-    ssh "$REMOTE_HOST" "cat > /opt/datasette/metadata.json" <<METADATA_EOF
+    ssh "$REMOTE_HOST" "cat > $REMOTE_INSTALL_DIR/metadata.json" <<METADATA_EOF
 {
     "title": "DataDawn 990 Explorer",
     "description_html": "<p>IRS Form 990 nonprofit data: <strong>${R_FMT} returns</strong> (tax years ${TAX_YEARS}), <strong>${G_FMT} foundation grants</strong>, <strong>${D_FMT} DAF disbursements</strong>, <strong>${S_FMT} Schedule I grants</strong>, <strong>${O_FMT} officers/directors</strong>, and <strong>${RE_FMT} related org relationships</strong>.</p>",
@@ -487,6 +488,6 @@ log "========================================="
 # ── Step 7: Auto-commit server config to git ─────────────────────────────
 log "--- Step 7: Git auto-commit ---"
 if ! dry "Would auto-commit server config changes"; then
-    ssh "$REMOTE_HOST" 'cd /opt/datasette && git add -A && git diff --cached --quiet || git commit -m "Auto: $(date +%Y-%m-%d) data update" && git push origin main' 2>>"$LOG_FILE"
+    ssh "$REMOTE_HOST" "cd $REMOTE_INSTALL_DIR && git add -A && git diff --cached --quiet || git commit -m 'Auto: \$(date +%Y-%m-%d) data update' && git push origin main" 2>>"$LOG_FILE"
     log "Git auto-commit complete"
 fi

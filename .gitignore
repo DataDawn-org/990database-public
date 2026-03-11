@@ -19,8 +19,16 @@ exports/
 .update_state
 update.log
 
-# Private docs
+# Private docs — NEVER commit these to the public repo
 CLAUDE.md
+ANALYSIS_SUMMARY.md
+DATABASE_GUIDE.md
+analyze_*.py
+analysis_*.py
+movement_*.py
+
+# Root update.sh has hardcoded credentials — use scripts/update.sh instead
+/update.sh
 
 # Secrets and credentials
 .env
