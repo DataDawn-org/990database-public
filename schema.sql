@@ -1,5 +1,5 @@
 -- 990data.db — Full Schema Dump
--- Dumped from live database, March 2026
+-- Dumped from live database, March 2026 (updated March 29, 2026)
 --
 -- IMPORTANT: This schema reflects SQLite as-built.
 -- The grants table uses AUTOINCREMENT (should be SERIAL/GENERATED in PG).
@@ -60,13 +60,19 @@ CREATE TABLE grants (
     purpose               TEXT,
     amount                INTEGER,
     grant_date            TEXT,           -- exp_responsibility only
-    expended_amount       INTEGER         -- exp_responsibility only
+    expended_amount       INTEGER,        -- exp_responsibility only
+    tax_year              INTEGER         -- denormalized from returns for sort/filter
 );
 CREATE INDEX idx_grants_oid          ON grants(object_id);
 CREATE INDEX idx_grants_ein          ON grants(ein);
 CREATE INDEX idx_grants_type         ON grants(grant_type);
 CREATE INDEX idx_grants_recip_upper  ON grants(recipient_name COLLATE NOCASE);
 CREATE INDEX idx_grants_ein_type     ON grants(ein, grant_type);
+CREATE INDEX idx_grants_oid_type     ON grants(object_id, grant_type);
+CREATE INDEX idx_grants_year         ON grants(tax_year);
+CREATE INDEX idx_grants_year_amount  ON grants(tax_year, amount DESC);
+CREATE INDEX idx_grants_ein_recip    ON grants(ein, recipient_name COLLATE NOCASE);
+CREATE INDEX idx_grants_recip_type   ON grants(recipient_name COLLATE NOCASE, grant_type);
 
 CREATE TABLE officers (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,8 +85,9 @@ CREATE TABLE officers (
     benefits              INTEGER,
     expense_account       INTEGER
 );
-CREATE INDEX idx_officers_oid ON officers(object_id);
-CREATE INDEX idx_officers_ein ON officers(ein);
+CREATE INDEX idx_officers_oid  ON officers(object_id);
+CREATE INDEX idx_officers_ein  ON officers(ein);
+CREATE INDEX idx_officers_comp ON officers(compensation DESC);
 
 CREATE TABLE contributors (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -214,8 +221,9 @@ CREATE INDEX idx_si_funder          ON schedule_i_grants(funder_ein);
 CREATE INDEX idx_si_recipient       ON schedule_i_grants(recipient_name);
 CREATE INDEX idx_si_recipient_ein   ON schedule_i_grants(recipient_ein);
 CREATE INDEX idx_si_year            ON schedule_i_grants(tax_year);
-CREATE INDEX idx_si_amount          ON schedule_i_grants(amount);
+CREATE INDEX idx_si_amount           ON schedule_i_grants(amount);
 CREATE INDEX idx_si_recipient_nocase ON schedule_i_grants(recipient_name COLLATE NOCASE);
+CREATE INDEX idx_si_funder_year_amt  ON schedule_i_grants(funder_ein, tax_year, amount DESC);
 
 -- ============================================================
 -- REFERENCE TABLES
@@ -253,3 +261,51 @@ CREATE TABLE bmf (
 );
 CREATE INDEX idx_bmf_ntee       ON bmf(ntee_cd);
 CREATE INDEX idx_bmf_name_upper ON bmf(UPPER(name));
+CREATE INDEX idx_bmf_subsection ON bmf(subsection);
+CREATE INDEX idx_bmf_state      ON bmf(state);
+CREATE INDEX idx_bmf_foundation ON bmf(foundation);
+
+-- ============================================================
+-- FTS5 FULL-TEXT SEARCH INDEXES
+-- ============================================================
+
+CREATE VIRTUAL TABLE fts_returns USING fts5(
+    org_name,
+    ein,
+    content=returns,
+    content_rowid=rowid
+);
+
+CREATE VIRTUAL TABLE fts_grants USING fts5(
+    recipient_name,
+    content=grants,
+    content_rowid=rowid
+);
+
+CREATE VIRTUAL TABLE fts_daf USING fts5(
+    recipient_name,
+    content=schedule_i_grants,
+    content_rowid=rowid
+);
+
+CREATE VIRTUAL TABLE fts_si990 USING fts5(
+    recipient_name,
+    content=schedule_i_990,
+    content_rowid=id
+);
+
+CREATE VIRTUAL TABLE fts_bmf USING fts5(
+    name,
+    ein,
+    city,
+    state,
+    ntee_cd,
+    content=bmf,
+    content_rowid=rowid
+);
+
+CREATE VIRTUAL TABLE fts_officers USING fts5(
+    person_name,
+    content=officers,
+    content_rowid=rowid
+);

@@ -1065,7 +1065,10 @@ LIMIT 25</textarea>
 
                 const countLabel = totalCount ? Number(totalCount).toLocaleString() : `${rows.length}${nextUrl ? '+' : ''}`;
                 const offsetLabel = currentOffset > 0 ? ` (showing ${currentOffset + 1}–${currentOffset + rows.length})` : '';
-                statusDiv.innerHTML = `<span class="count">${countLabel}</span> results${offsetLabel} in ${getTabLabel()}`;
+                const qEnc = encodeURIComponent(currentQuery);
+                const resultsTab = currentTab === 'charity' ? 'grants' : currentTab;
+                const exploreLink = totalCount && parseInt(totalCount) > PAGE_SIZE ? ` <a href="/explore/results.html?tab=${resultsTab}&q=${qEnc}" style="margin-left:1rem;color:var(--dawn-amber);text-decoration:none;font-size:0.9rem">Explore all results &rarr;</a>` : '';
+                statusDiv.innerHTML = `<span class="count">${countLabel}</span> results${offsetLabel} in ${getTabLabel()}${exploreLink}`;
 
                 let html = '';
                 switch (currentTab) {

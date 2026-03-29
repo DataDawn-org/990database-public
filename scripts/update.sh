@@ -10,7 +10,7 @@
 # Prerequisites:
 #   - curl for downloading from IRS website
 #   - unzip for extracting ZIP archives
-#   - ssh key for your deployment server
+#   - ssh key for user@YOUR_SERVER_IP
 #   - Python 3 with lxml
 #   - sqlite3 CLI
 #
@@ -25,14 +25,13 @@ STATE_FILE="$PROJECT_DIR/.update_state"
 LOG_FILE="$PROJECT_DIR/update.log"
 EXTRACTED_DIR="$PROJECT_DIR/.extracted"
 IRS_BASE_URL="https://apps.irs.gov/pub/epostcard/990/xml"
-REMOTE_HOST="${DATADAWN_REMOTE_HOST:?Set DATADAWN_REMOTE_HOST (e.g. user@your-server)}"
-REMOTE_INSTALL_DIR="${DATADAWN_REMOTE_DIR:?Set DATADAWN_REMOTE_DIR (e.g. /opt/datasette)}"
-REMOTE_DB_PATH="$REMOTE_INSTALL_DIR/990data_public.db"
+REMOTE_HOST="user@YOUR_SERVER_IP"
+REMOTE_DB_PATH="/opt/datasette/990data_public.db"
 
-EXTRACT_CORE="$PROJECT_DIR/extract_990.py"
-EXTRACT_PF="$PROJECT_DIR/extract_990pf_detail.py"
-EXTRACT_SI="$PROJECT_DIR/extract_schedule_i.py"
-EXTRACT_DETAIL="$PROJECT_DIR/extract_990_detail.py"
+EXTRACT_CORE="$SCRIPT_DIR/extract_990.py"
+EXTRACT_PF="$SCRIPT_DIR/extract_990pf_detail.py"
+EXTRACT_SI="$SCRIPT_DIR/extract_schedule_i.py"
+EXTRACT_DETAIL="$SCRIPT_DIR/extract_990_detail.py"
 
 DRY_RUN=0
 
@@ -118,7 +117,7 @@ mkdir -p "$EXTRACTED_DIR"
 log "--- Step 0: Git backup of current server state ---"
 if ! dry "Would commit current server state to git"; then
     BACKUP_MSG="Pre-update backup: $(date '+%Y-%m-%d %H:%M:%S')"
-    ssh "$REMOTE_HOST" "cd $REMOTE_INSTALL_DIR && git add -A && { git diff --cached --quiet && echo 'No changes to backup' || { git commit -m \"$BACKUP_MSG\" && git push origin main; }; }" 2>>"$LOG_FILE"
+    ssh "$REMOTE_HOST" "cd /opt/datasette && git add -A && { git diff --cached --quiet && echo 'No changes to backup' || { git commit -m \"$BACKUP_MSG\" && git push origin main; }; }" 2>>"$LOG_FILE"
     log "Git backup complete"
 fi
 
@@ -140,10 +139,11 @@ log "--- Step 2: IRS download ---"
 STEP2_START=$(date +%s)
 NEW_FILES=0
 
-# Determine which years to check (current and previous, in case of late postings)
+# Check all years from 2017 through current year.
+# IRS directory listings no longer work (302 redirect since ~2025), so we probe
+# known batch name patterns via HTTP HEAD to discover available ZIPs.
 CURRENT_YEAR=$(date '+%Y')
-PREV_YEAR=$(( CURRENT_YEAR - 1 ))
-YEARS_TO_CHECK=("$PREV_YEAR" "$CURRENT_YEAR")
+FIRST_YEAR=2017
 
 download_batch() {
     local year="$1"
@@ -155,10 +155,18 @@ download_batch() {
         return 0
     fi
 
+    local url="$IRS_BASE_URL/$year/$zip_name"
+
+    # Probe with HTTP HEAD — skip if 404/redirect
+    local http_code
+    http_code=$(curl -sI -o /dev/null -w '%{http_code}' -L "$url" 2>/dev/null || echo "000")
+    if [[ "$http_code" != "200" ]]; then
+        return 0
+    fi
+
     local year_dir="$PROJECT_DIR/$year"
     local batch_dir="$year_dir/$batch_name"
     local zip_path="$year_dir/${zip_name}"
-    local url="$IRS_BASE_URL/$year/$zip_name"
 
     mkdir -p "$year_dir"
 
@@ -197,22 +205,19 @@ download_batch() {
     log "  Downloaded $xml_count files from $batch_name"
 }
 
-for YEAR in "${YEARS_TO_CHECK[@]}"; do
+# Known IRS batch name patterns:
+#   {YEAR}_TEOS_XML_01A through 12A (monthly batches)
+#   {YEAR}_TEOS_XML_11B, 11C, 11D (overflow batches, seen in 2025)
+#   {YEAR}_TEOS_XML_CT1 (correction/catch-up batch, seen in 2017)
+BATCH_SUFFIXES=(01A 02A 03A 04A 05A 06A 07A 08A 09A 10A 11A 11B 11C 11D 12A CT1)
+
+for (( YEAR=FIRST_YEAR; YEAR<=CURRENT_YEAR; YEAR++ )); do
     log "Checking IRS downloads for year $YEAR..."
 
-    # Fetch the index page to discover available batches
-    AVAILABLE_ZIPS=$(curl -sL "$IRS_BASE_URL/$YEAR/" 2>/dev/null \
-        | grep -oE '[0-9]{4}_TEOS_XML_[0-9A-Za-z]+\.zip' \
-        | sort -u || true)
-
-    if [[ -z "$AVAILABLE_ZIPS" ]]; then
-        log "  No TEOS_XML batches found for $YEAR"
-        continue
-    fi
-
-    for ZIP in $AVAILABLE_ZIPS; do
-        BATCH_NAME="${ZIP%.zip}"
-        download_batch "$YEAR" "$ZIP" "$BATCH_NAME"
+    for SUFFIX in "${BATCH_SUFFIXES[@]}"; do
+        ZIP_NAME="${YEAR}_TEOS_XML_${SUFFIX}.zip"
+        BATCH_NAME="${ZIP_NAME%.zip}"
+        download_batch "$YEAR" "$ZIP_NAME" "$BATCH_NAME"
     done
 done
 
@@ -226,6 +231,15 @@ fi
 # ── Step 3: Parse new filings into 990data.db ────────────────────────────
 log "--- Step 3: Parse new filings ---"
 STEP3_START=$(date +%s)
+
+# Backup database before modifying
+BACKUP_DB="$PROJECT_DIR/990data_prev.db"
+log "Backing up $DB → $BACKUP_DB"
+if ! dry "Would backup $DB"; then
+    cp "$DB" "$BACKUP_DB"
+    BACKUP_SIZE_MB=$(du -m "$BACKUP_DB" | cut -f1)
+    log "Backup complete (${BACKUP_SIZE_MB}MB)"
+fi
 
 PRE_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM returns")
 log "Returns before: $PRE_COUNT"
@@ -317,6 +331,19 @@ else
         fi
     done
 
+    # Add tax_year to grants table (denormalized from returns for sort/filter)
+    log "Adding tax_year to grants table..."
+    sqlite3 "$PUBLIC_DB" <<'SQL'
+        ALTER TABLE grants ADD COLUMN tax_year INTEGER;
+        UPDATE grants SET tax_year = (
+            SELECT r.tax_year FROM returns r WHERE r.object_id = grants.object_id
+        );
+        CREATE INDEX IF NOT EXISTS idx_grants_year ON grants(tax_year);
+SQL
+    GRANTS_WITH_YEAR=$(sqlite3 "$PUBLIC_DB" "SELECT COUNT(*) FROM grants WHERE tax_year IS NOT NULL")
+    GRANTS_TOTAL=$(sqlite3 "$PUBLIC_DB" "SELECT COUNT(*) FROM grants")
+    log "  Grants with tax_year: $GRANTS_WITH_YEAR / $GRANTS_TOTAL"
+
     # Build FTS5 indexes
     log "Building FTS5 indexes..."
     sqlite3 "$PUBLIC_DB" <<'SQL'
@@ -348,6 +375,15 @@ else
         );
         INSERT INTO fts_daf(fts_daf) VALUES('rebuild');
 
+        -- FTS on schedule_i_990: search public charity grants by recipient name
+        DROP TABLE IF EXISTS fts_si990;
+        CREATE VIRTUAL TABLE fts_si990 USING fts5(
+            recipient_name,
+            content=schedule_i_990,
+            content_rowid=id
+        );
+        INSERT INTO fts_si990(fts_si990) VALUES('rebuild');
+
         -- FTS on bmf: search by name, EIN, city, state
         DROP TABLE IF EXISTS fts_bmf;
         CREATE VIRTUAL TABLE fts_bmf USING fts5(
@@ -359,6 +395,15 @@ else
             content_rowid=rowid
         );
         INSERT INTO fts_bmf(fts_bmf) VALUES('rebuild');
+
+        -- FTS on officers: search by person name (44M+ rows, critical for people search API)
+        DROP TABLE IF EXISTS fts_officers;
+        CREATE VIRTUAL TABLE fts_officers USING fts5(
+            person_name,
+            content=officers,
+            content_rowid=rowid
+        );
+        INSERT INTO fts_officers(fts_officers) VALUES('rebuild');
 SQL
     log "FTS5 indexes built"
 
@@ -368,12 +413,17 @@ SQL
     sqlite3 "$PUBLIC_DB" <<'SQL'
         CREATE INDEX IF NOT EXISTS idx_grants_ein_type     ON grants(ein, grant_type);
         CREATE INDEX IF NOT EXISTS idx_grants_oid_type     ON grants(object_id, grant_type);
+        CREATE INDEX IF NOT EXISTS idx_grants_year_amount  ON grants(tax_year, amount DESC);
+        CREATE INDEX IF NOT EXISTS idx_grants_ein_recip    ON grants(ein, recipient_name COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_grants_recip_type   ON grants(recipient_name COLLATE NOCASE, grant_type);
         CREATE INDEX IF NOT EXISTS idx_returns_ein_type    ON returns(ein, return_type);
         CREATE INDEX IF NOT EXISTS idx_returns_ein_year_oid ON returns(ein, tax_year DESC, object_id DESC);
         CREATE INDEX IF NOT EXISTS idx_si_recipient_nocase ON schedule_i_grants(recipient_name COLLATE NOCASE);
         CREATE INDEX IF NOT EXISTS idx_si_funder_year_amt  ON schedule_i_grants(funder_ein, tax_year, amount DESC);
         CREATE INDEX IF NOT EXISTS idx_bmf_subsection       ON bmf(subsection);
+        CREATE INDEX IF NOT EXISTS idx_bmf_state            ON bmf(state);
         CREATE INDEX IF NOT EXISTS idx_bmf_foundation       ON bmf(foundation);
+        CREATE INDEX IF NOT EXISTS idx_officers_comp        ON officers(compensation DESC);
 SQL
     log "Performance indexes verified"
 
@@ -387,6 +437,13 @@ SQL
 fi
 
 log "Public DB build complete ($(elapsed "$STEP4_START")s)"
+
+# ── Step 4b: Generate audit report ───────────────────────────────────────
+log "--- Step 4b: Generate audit report ---"
+if ! dry "Would generate audit report"; then
+    python3 "$PROJECT_DIR/generate_audit.py" "$PUBLIC_DB" 2>>"$LOG_FILE"
+    log "Audit report generated: $PROJECT_DIR/build_reports/audit_latest.md"
+fi
 
 # ── Step 5: Upload to server ──────────────────────────────────────────────
 log "--- Step 5: Upload to Datasette server ---"
@@ -402,20 +459,20 @@ else
 
     # Deploy detail page templates and static assets
     log "Deploying templates and static assets..."
-    ssh "$REMOTE_HOST" "mkdir -p $REMOTE_INSTALL_DIR/templates/pages/org $REMOTE_INSTALL_DIR/templates/pages/grant $REMOTE_INSTALL_DIR/templates/pages/daf $REMOTE_INSTALL_DIR/templates/pages/filing $REMOTE_INSTALL_DIR/static"
-    scp "$PROJECT_DIR/templates/pages/base_datadawn.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/base_datadawn.html"
-    scp "$PROJECT_DIR/templates/pages/org/{ein}.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/org/{ein}.html"
-    scp "$PROJECT_DIR/templates/pages/grant/{id}.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/grant/{id}.html"
-    scp "$PROJECT_DIR/templates/pages/daf/{id}.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/daf/{id}.html"
-    scp "$PROJECT_DIR/templates/pages/filing/{object_id}.html" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/templates/pages/filing/{object_id}.html"
-    scp "$PROJECT_DIR/static/datadawn.css" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/static/datadawn.css"
+    ssh "$REMOTE_HOST" 'mkdir -p /opt/datasette/templates/pages/org /opt/datasette/templates/pages/grant /opt/datasette/templates/pages/daf /opt/datasette/templates/pages/filing /opt/datasette/static'
+    scp "$PROJECT_DIR/templates/pages/base_datadawn.html" "$REMOTE_HOST:/opt/datasette/templates/pages/base_datadawn.html"
+    scp "$PROJECT_DIR/templates/pages/org/{ein}.html" "$REMOTE_HOST:/opt/datasette/templates/pages/org/{ein}.html"
+    scp "$PROJECT_DIR/templates/pages/grant/{id}.html" "$REMOTE_HOST:/opt/datasette/templates/pages/grant/{id}.html"
+    scp "$PROJECT_DIR/templates/pages/daf/{id}.html" "$REMOTE_HOST:/opt/datasette/templates/pages/daf/{id}.html"
+    scp "$PROJECT_DIR/templates/pages/filing/{object_id}.html" "$REMOTE_HOST:/opt/datasette/templates/pages/filing/{object_id}.html"
+    scp "$PROJECT_DIR/static/datadawn.css" "$REMOTE_HOST:/opt/datasette/static/datadawn.css"
     # Deploy explore pages
-    ssh "$REMOTE_HOST" "mkdir -p $REMOTE_INSTALL_DIR/explore"
-    scp -rq "$PROJECT_DIR/explore/"* "$REMOTE_HOST:$REMOTE_INSTALL_DIR/explore/"
+    ssh "$REMOTE_HOST" 'mkdir -p /opt/datasette/explore'
+    scp -rq "$PROJECT_DIR/explore/"* "$REMOTE_HOST:/opt/datasette/explore/"
     log "Explore pages deployed"
     # Deploy performance plugin
-    ssh "$REMOTE_HOST" "mkdir -p $REMOTE_INSTALL_DIR/plugins"
-    scp "$PROJECT_DIR/plugins/performance.py" "$REMOTE_HOST:$REMOTE_INSTALL_DIR/plugins/performance.py"
+    ssh "$REMOTE_HOST" 'mkdir -p /opt/datasette/plugins'
+    scp "$PROJECT_DIR/plugins/performance.py" "$REMOTE_HOST:/opt/datasette/plugins/performance.py"
     log "Templates, static assets, and plugins deployed"
 
     # Update metadata.json with current stats
@@ -437,7 +494,7 @@ else
     O_FMT=$(echo "" | fmt "$OFFICERS_COUNT")
     RE_FMT=$(echo "" | fmt "$RELATED_COUNT")
 
-    ssh "$REMOTE_HOST" "cat > $REMOTE_INSTALL_DIR/metadata.json" <<METADATA_EOF
+    ssh "$REMOTE_HOST" "cat > /opt/datasette/metadata.json" <<METADATA_EOF
 {
     "title": "DataDawn 990 Explorer",
     "description_html": "<p>IRS Form 990 nonprofit data: <strong>${R_FMT} returns</strong> (tax years ${TAX_YEARS}), <strong>${G_FMT} foundation grants</strong>, <strong>${D_FMT} DAF disbursements</strong>, <strong>${S_FMT} Schedule I grants</strong>, <strong>${O_FMT} officers/directors</strong>, and <strong>${RE_FMT} related org relationships</strong>.</p>",
@@ -488,6 +545,6 @@ log "========================================="
 # ── Step 7: Auto-commit server config to git ─────────────────────────────
 log "--- Step 7: Git auto-commit ---"
 if ! dry "Would auto-commit server config changes"; then
-    ssh "$REMOTE_HOST" "cd $REMOTE_INSTALL_DIR && git add -A && git diff --cached --quiet || git commit -m 'Auto: \$(date +%Y-%m-%d) data update' && git push origin main" 2>>"$LOG_FILE"
+    ssh "$REMOTE_HOST" 'cd /opt/datasette && git add -A && git diff --cached --quiet || git commit -m "Auto: $(date +%Y-%m-%d) data update" && git push origin main' 2>>"$LOG_FILE"
     log "Git auto-commit complete"
 fi

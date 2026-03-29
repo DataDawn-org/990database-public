@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiMwYTBlMWEiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTExODI3Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJiYXIiIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZkZTY4YSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNmNTllMGIiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8cmFkaWFsR3JhZGllbnQgaWQ9InN1biI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNmZGU2OGEiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjZjU5ZTBiIi8+CiAgICA8L3JhZGlhbEdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJob3JpeiIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjZjU5ZTBiIiBzdG9wLW9wYWNpdHk9IjAiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIzMCUiIHN0b3AtY29sb3I9IiNmNTllMGIiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSI3MCUiIHN0b3AtY29sb3I9IiNmNTllMGIiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjZjU5ZTBiIiBzdG9wLW9wYWNpdHk9IjAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDwhLS0gQmFja2dyb3VuZCAtLT4KICA8cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI2IiBmaWxsPSJ1cmwoI2JnKSIvPgogIDwhLS0gRGF0YSBjb2x1bW5zIHJpc2luZyBsaWtlIGEgc3VucmlzZSAtLT4KICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxNiwgMjEpIj4KICAgIDxyZWN0IHg9Ii0xMCIgeT0iLTUiIHdpZHRoPSIyLjUiIGhlaWdodD0iNSIgcng9IjAuNSIgZmlsbD0idXJsKCNiYXIpIiBvcGFjaXR5PSIwLjUiLz4KICAgIDxyZWN0IHg9Ii02LjUiIHk9Ii05IiB3aWR0aD0iMi41IiBoZWlnaHQ9IjkiIHJ4PSIwLjUiIGZpbGw9InVybCgjYmFyKSIgb3BhY2l0eT0iMC43Ii8+CiAgICA8cmVjdCB4PSItMS4yNSIgeT0iLTE0IiB3aWR0aD0iMi41IiBoZWlnaHQ9IjE0IiByeD0iMC41IiBmaWxsPSJ1cmwoI2JhcikiLz4KICAgIDxyZWN0IHg9IjQiIHk9Ii05IiB3aWR0aD0iMi41IiBoZWlnaHQ9IjkiIHJ4PSIwLjUiIGZpbGw9InVybCgjYmFyKSIgb3BhY2l0eT0iMC43Ii8+CiAgICA8cmVjdCB4PSI3LjUiIHk9Ii01IiB3aWR0aD0iMi41IiBoZWlnaHQ9IjUiIHJ4PSIwLjUiIGZpbGw9InVybCgjYmFyKSIgb3BhY2l0eT0iMC41Ii8+CiAgPC9nPgogIDwhLS0gU3VuIGRpc2MgLS0+CiAgPGNpcmNsZSBjeD0iMTYiIGN5PSIxOS41IiByPSIzIiBmaWxsPSJ1cmwoI3N1bikiIG9wYWNpdHk9IjAuODUiLz4KICA8IS0tIEhvcml6b24gbGluZSAtLT4KICA8bGluZSB4MT0iNCIgeTE9IjIxIiB4Mj0iMjgiIHkyPSIyMSIgc3Ryb2tlPSJ1cmwoI2hvcml6KSIgc3Ryb2tlLXdpZHRoPSIwLjc1Ii8+Cjwvc3ZnPgo=">
+    <title>Advanced Results — 990 Data by DataDawn</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Mono:wght@300;400;500&family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --night: #0a0e1a;
+            --deep: #111827;
+            --twilight: #1a2342;
+            --horizon: #2a3a6b;
+            --dawn-amber: #f59e0b;
+            --dawn-gold: #fbbf24;
+            --dawn-light: #fde68a;
+            --dawn-white: #fef3c7;
+            --dawn-rose: #fb923c;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --surface: rgba(255,255,255,0.03);
+            --surface-hover: rgba(255,255,255,0.06);
+            --border: rgba(255,255,255,0.08);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--night);
+            color: var(--text-primary);
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        nav {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 1.5rem 3rem; border-bottom: 1px solid var(--border);
+        }
+        .nav-brand { font-family: 'DM Serif Display', serif; font-size: 1.4rem; color: var(--dawn-gold); text-decoration: none; letter-spacing: 0.02em; }
+        .nav-links { display: flex; gap: 2rem; }
+        .nav-links a { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 400; color: var(--text-muted); text-decoration: none; text-transform: uppercase; letter-spacing: 0.1em; transition: color 0.3s; }
+        .nav-links a:hover, .nav-links a.active { color: var(--dawn-gold); }
+
+        /* Top bar */
+        .top-bar {
+            padding: 1.5rem 3rem;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;
+        }
+        .top-bar-left { display: flex; align-items: center; gap: 1rem; }
+        .back-link {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem;
+            color: var(--dawn-amber); text-decoration: none; letter-spacing: 0.05em;
+        }
+        .back-link:hover { color: var(--dawn-gold); }
+        .top-bar-title {
+            font-family: 'DM Serif Display', serif; font-size: 1.1rem;
+            color: var(--text-primary);
+        }
+        .top-bar-title .query-term { color: var(--dawn-gold); }
+        .top-bar-count {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem;
+            color: var(--text-muted); letter-spacing: 0.05em;
+        }
+        .top-bar-count span { color: var(--dawn-gold); }
+
+        /* Layout: sidebar + results */
+        .layout {
+            display: flex; max-width: 1400px; margin: 0 auto;
+            min-height: calc(100vh - 200px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px; flex-shrink: 0; padding: 1.5rem;
+            border-right: 1px solid var(--border); overflow-y: auto;
+        }
+        .sidebar-section { margin-bottom: 1.5rem; }
+        .sidebar-label {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
+            color: var(--text-muted); text-transform: uppercase;
+            letter-spacing: 0.1em; margin-bottom: 0.5rem;
+        }
+        .sidebar select, .sidebar input[type="number"], .sidebar input[type="text"] {
+            width: 100%; padding: 0.5rem 0.6rem;
+            background: var(--deep); border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text-primary);
+            font-family: 'Outfit', sans-serif; font-size: 0.85rem;
+            outline: none; transition: border-color 0.3s;
+        }
+        .sidebar select:focus, .sidebar input:focus {
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+        .sidebar select option { background: var(--deep); color: var(--text-primary); }
+        .range-row { display: flex; gap: 0.5rem; align-items: center; }
+        .range-row span { color: var(--text-muted); font-size: 0.8rem; }
+        .amount-chips {
+            display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem;
+        }
+        .amount-chip {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem;
+            color: var(--text-muted); background: var(--surface);
+            border: 1px solid var(--border); padding: 0.25rem 0.6rem;
+            border-radius: 4px; cursor: pointer; transition: all 0.2s;
+        }
+        .amount-chip:hover, .amount-chip.active {
+            color: var(--dawn-gold); border-color: rgba(245,158,11,0.3);
+            background: rgba(245,158,11,0.06);
+        }
+        .apply-btn {
+            width: 100%; padding: 0.7rem; margin-top: 0.5rem;
+            background: linear-gradient(135deg, var(--dawn-amber), var(--dawn-rose));
+            border: none; color: var(--night);
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+            font-weight: 500; border-radius: 6px; cursor: pointer;
+            letter-spacing: 0.05em; text-transform: uppercase;
+            transition: opacity 0.2s;
+        }
+        .apply-btn:hover { opacity: 0.9; }
+        .clear-btn {
+            width: 100%; padding: 0.5rem; margin-top: 0.3rem;
+            background: none; border: 1px solid var(--border);
+            color: var(--text-muted); font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.65rem; border-radius: 6px; cursor: pointer;
+            letter-spacing: 0.05em; text-transform: uppercase;
+        }
+        .clear-btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
+
+        /* Results area */
+        .results-area { flex: 1; padding: 1.5rem 2rem; min-width: 0; }
+
+        .sort-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;
+        }
+        .sort-options { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+        .sort-chip {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem;
+            color: var(--text-muted); background: var(--surface);
+            border: 1px solid var(--border); padding: 0.35rem 0.7rem;
+            border-radius: 4px; cursor: pointer; transition: all 0.2s;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .sort-chip:hover { color: var(--text-secondary); }
+        .sort-chip.active {
+            color: var(--dawn-gold); border-color: rgba(245,158,11,0.3);
+            background: rgba(245,158,11,0.06);
+        }
+        .csv-btn {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem;
+            color: var(--dawn-amber); background: none;
+            border: 1px solid rgba(245,158,11,0.3); padding: 0.35rem 0.7rem;
+            border-radius: 4px; cursor: pointer; text-transform: uppercase;
+            letter-spacing: 0.05em; text-decoration: none; transition: all 0.2s;
+        }
+        .csv-btn:hover { background: rgba(245,158,11,0.06); }
+
+        .status { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: var(--text-muted); margin-bottom: 1rem; letter-spacing: 0.05em; }
+        .status .count { color: var(--dawn-gold); }
+
+        .result-card {
+            background: var(--deep); border: 1px solid var(--border);
+            border-radius: 10px; padding: 1.5rem; margin-bottom: 0.75rem;
+            transition: border-color 0.3s, transform 0.2s; cursor: pointer;
+        }
+        .result-card:hover { border-color: rgba(245,158,11,0.2); transform: translateY(-1px); }
+        .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.5rem; }
+        .card-title { font-family: 'DM Serif Display', serif; font-size: 1.05rem; color: var(--text-primary); line-height: 1.3; }
+        .card-meta { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+        .meta-item { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.03em; }
+        .meta-item span { color: var(--dawn-gold); }
+        .money { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 500; color: var(--dawn-gold); }
+
+        .badge-paid { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 3px; background: rgba(34,197,94,0.15); color: #4ade80; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge-future { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 3px; background: rgba(59,130,246,0.15); color: #60a5fa; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge-expresp { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 3px; background: rgba(245,158,11,0.15); color: #fbbf24; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge-990 { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 3px; background: rgba(34,197,94,0.15); color: #4ade80; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge-990ez { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 3px; background: rgba(59,130,246,0.15); color: #60a5fa; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge-990pf { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 3px; background: rgba(245,158,11,0.15); color: #fbbf24; text-transform: uppercase; letter-spacing: 0.05em; }
+        .state-badge { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.55rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: rgba(245,158,11,0.1); color: var(--dawn-amber); margin-left: 0.3rem; }
+        .badge-us { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 3px; background: rgba(34,197,94,0.15); color: #4ade80; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge-foreign { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 500; padding: 0.15rem 0.5rem; border-radius: 3px; background: rgba(59,130,246,0.15); color: #60a5fa; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        /* Pagination */
+        .pagination {
+            display: flex; justify-content: center; align-items: center;
+            gap: 0.3rem; margin-top: 1.5rem; flex-wrap: wrap;
+        }
+        .page-btn {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem;
+            color: var(--text-muted); background: var(--surface);
+            border: 1px solid var(--border); padding: 0.4rem 0.7rem;
+            border-radius: 4px; cursor: pointer; transition: all 0.2s;
+            min-width: 32px; text-align: center;
+        }
+        .page-btn:hover { color: var(--text-secondary); background: var(--surface-hover); }
+        .page-btn.active { color: var(--dawn-gold); border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.06); }
+        .page-btn.disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+        .page-ellipsis { color: var(--text-muted); font-size: 0.7rem; padding: 0 0.3rem; }
+
+        .empty-state { text-align: center; padding: 3rem; color: var(--text-muted); font-size: 0.95rem; font-weight: 300; }
+
+        /* Detail panel */
+        .detail-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1000; }
+        .detail-overlay.open { display: block; }
+        .detail-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(1400px, 75vw); background: var(--night); border-left: 1px solid var(--border); overflow-y: auto; z-index: 1001; transform: translateX(100%); transition: transform 0.3s ease; }
+        .detail-panel.open { transform: translateX(0); }
+        .detail-close { position: sticky; top: 1.5rem; float: right; margin-right: 1.5rem; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); width: 36px; height: 36px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; transition: all 0.3s; z-index: 10; }
+        .detail-close:hover { color: var(--dawn-gold); border-color: rgba(245,158,11,0.3); }
+        .detail-header { padding: 2rem 2rem 1rem; }
+        .detail-title { font-family: 'DM Serif Display', serif; font-size: 1.4rem; color: var(--text-primary); line-height: 1.3; margin-bottom: 0.5rem; }
+        .detail-subtitle { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--text-muted); letter-spacing: 0.03em; }
+        .detail-content { padding: 2rem; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+        .detail-item { background: var(--deep); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; }
+        .detail-item .label { font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+        .detail-item .value { font-size: 0.9rem; color: var(--text-primary); margin-top: 0.3rem; }
+        .detail-item .value.large { font-family: 'IBM Plex Mono', monospace; font-size: 1.3rem; color: var(--dawn-gold); }
+        .section-title { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin: 1.5rem 0 0.75rem; }
+        .section-title:first-child { margin-top: 0; }
+        .doc-link { color: var(--dawn-gold); text-decoration: none; }
+        .doc-link:hover { text-decoration: underline; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        thead th { font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+        tbody td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+        tbody tr:hover { background: var(--surface); }
+
+        footer { border-top: 1px solid var(--border); padding: 2rem 3rem; text-align: center; margin-top: 3rem; }
+        .footer-text { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: var(--text-muted); letter-spacing: 0.05em; }
+        .footer-text a { color: var(--dawn-amber); text-decoration: none; }
+
+        @media (max-width: 900px) {
+            nav { padding: 1rem 1.5rem; }
+            .nav-links { gap: 1rem; }
+            .nav-links a { font-size: 0.65rem; }
+            .top-bar { padding: 1rem 1.5rem; }
+            .layout { flex-direction: column; }
+            .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); padding: 1rem 1.5rem; }
+            .results-area { padding: 1rem 1.5rem; }
+            .detail-panel { width: 100vw; }
+            .detail-grid { grid-template-columns: 1fr; }
+            footer { padding: 2rem 1.5rem; }
+        }
+
+        .sidebar-toggle {
+            display: none; font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.72rem; color: var(--dawn-amber);
+            background: var(--surface); border: 1px solid var(--border);
+            padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;
+            margin-bottom: 1rem; width: 100%;
+        }
+        @media (max-width: 900px) {
+            .sidebar-toggle { display: block; }
+            .sidebar.collapsed .sidebar-section { display: none; }
+            .sidebar.collapsed .apply-btn, .sidebar.collapsed .clear-btn { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="https://datadawn.org" class="nav-brand">DataDawn</a>
+        <div class="nav-links">
+            <a href="https://datadawn.org/explore.html">Explore</a>
+            <a href="/explore/bmf.html">BMF</a>
+            <a href="/explore/990.html">990 Filings</a>
+            <a href="/explore/grants.html">Grants</a>
+            <a href="/explore/daf.html">DAF</a>
+            <a href="/990data_public">Raw Database</a>
+            <a href="https://regs.datadawn.org">OpenRegs</a>
+        </div>
+    </nav>
+
+    <div class="top-bar">
+        <div class="top-bar-left">
+            <a href="#" id="backLink" class="back-link">&larr; Back to search</a>
+            <div class="top-bar-title" id="topTitle"></div>
+        </div>
+        <div class="top-bar-count" id="topCount"></div>
+    </div>
+
+    <div class="layout">
+        <div class="sidebar" id="sidebar">
+            <button class="sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('collapsed')">Toggle Filters</button>
+
+            <div class="sidebar-section">
+                <div class="sidebar-label">State</div>
+                <select id="filterState"><option value="">All states</option></select>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-label">Year</div>
+                <div class="range-row">
+                    <input type="number" id="filterYearFrom" placeholder="From" min="2014" max="2025">
+                    <span>&ndash;</span>
+                    <input type="number" id="filterYearTo" placeholder="To" min="2014" max="2025">
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-label">Amount</div>
+                <div class="range-row">
+                    <input type="number" id="filterAmountMin" placeholder="Min $">
+                    <span>&ndash;</span>
+                    <input type="number" id="filterAmountMax" placeholder="Max $">
+                </div>
+                <div class="amount-chips">
+                    <span class="amount-chip" data-min="1000" onclick="setAmount(1000,null)">$1K+</span>
+                    <span class="amount-chip" data-min="10000" onclick="setAmount(10000,null)">$10K+</span>
+                    <span class="amount-chip" data-min="100000" onclick="setAmount(100000,null)">$100K+</span>
+                    <span class="amount-chip" data-min="1000000" onclick="setAmount(1000000,null)">$1M+</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section" id="grantTypeSection">
+                <div class="sidebar-label">Grant Type</div>
+                <select id="filterGrantType">
+                    <option value="">All types</option>
+                    <option value="paid">Paid</option>
+                    <option value="future">Future</option>
+                    <option value="exp_responsibility">Exp. Responsibility</option>
+                </select>
+            </div>
+
+            <div class="sidebar-section" id="returnTypeSection" style="display:none">
+                <div class="sidebar-label">Return Type</div>
+                <select id="filterReturnType">
+                    <option value="">All types</option>
+                    <option value="990">990</option>
+                    <option value="990EZ">990-EZ</option>
+                    <option value="990PF">990-PF</option>
+                </select>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-label">Keyword filter</div>
+                <input type="text" id="filterKeyword" placeholder="Additional keyword...">
+            </div>
+
+            <button class="apply-btn" onclick="applyFilters()">Apply Filters</button>
+            <button class="clear-btn" onclick="clearFilters()">Clear All</button>
+        </div>
+
+        <div class="results-area">
+            <div class="sort-bar">
+                <div class="sort-options" id="sortOptions">
+                    <button class="sort-chip active" data-sort="amount_desc" onclick="setSort('amount_desc')">Amount &darr;</button>
+                    <button class="sort-chip" data-sort="amount_asc" onclick="setSort('amount_asc')">Amount &uarr;</button>
+                    <button class="sort-chip" data-sort="year_desc" onclick="setSort('year_desc')">Newest</button>
+                    <button class="sort-chip" data-sort="year_asc" onclick="setSort('year_asc')">Oldest</button>
+                </div>
+                <a class="csv-btn" id="csvLink" href="#" target="_blank">Download CSV</a>
+            </div>
+            <div id="results"><div class="empty-state">Loading results...</div></div>
+            <div id="pagination" class="pagination"></div>
+        </div>
+    </div>
+
+    <div class="detail-overlay" id="detailOverlay" onclick="closeDetail()"></div>
+    <div class="detail-panel" id="detailPanel">
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <div id="detailHeader" class="detail-header"></div>
+        <div class="detail-content" id="detailContent"></div>
+    </div>
+
+    <footer>
+        <div class="footer-text">
+            <a href="https://datadawn.org">DataDawn</a> &mdash; Pure information from public records &mdash; Free forever
+        </div>
+    </footer>
+
+    <script>
+        const API = '/990data_public';
+        const PAGE_SIZE = 30;
+
+        let currentTab = '';
+        let currentQuery = '';
+        let currentSort = 'amount_desc';
+        let currentPage = 1;
+        let totalCount = null;
+        let debounceTimer = null;
+
+        // Helpers
+        function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+        function sqlEsc(s) { return s ? s.replace(/'/g, "''") : ''; }
+
+        // Sanitize user input for FTS5 MATCH — strips special chars, wraps words in quotes
+        function sanitizeFTS(q) {
+            let s = q.replace(/[\"*(){}[\]^~:]/g, '');
+            s = s.replace(/(^|\s)[+\-](\w)/g, '$1$2');
+            s = s.replace(/\bAND\b/g, 'and').replace(/\bOR\b/g, 'or').replace(/\bNOT\b/g, 'not');
+            const words = s.trim().split(/\s+/).filter(w => w.length > 0);
+            if (!words.length) return '';
+            return words.map(w => '"' + w + '"').join(' ');
+        }
+        function fmtMoney(n) {
+            if (n == null || n === '') return '\u2014';
+            n = Number(n); if (isNaN(n)) return '\u2014';
+            if (n >= 1e9) return '$' + (n/1e9).toFixed(1) + 'B';
+            if (n >= 1e6) return '$' + (n/1e6).toFixed(1) + 'M';
+            if (n >= 1e3) return '$' + (n/1e3).toFixed(0) + 'K';
+            return '$' + n.toLocaleString();
+        }
+        function fmt(n) {
+            if (n == null) return '\u2014';
+            if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+            if (n >= 1e3) return (n/1e3).toFixed(0)+'K';
+            return Number(n).toLocaleString();
+        }
+
+        async function query(sql) {
+            const url = `${API}.json?sql=${encodeURIComponent(sql)}&_shape=objects`;
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`Query failed: ${resp.status}`);
+            const data = await resp.json();
+            return data.rows || [];
+        }
+
+        function getParam(k) { return new URLSearchParams(location.search).get(k); }
+        function setParams(params) {
+            const u = new URLSearchParams(location.search);
+            for (const [k,v] of Object.entries(params)) {
+                if (v === null || v === undefined || v === '') u.delete(k);
+                else u.set(k, v);
+            }
+            history.replaceState(null, '', '?' + u.toString());
+        }
+
+        // Tab-specific config
+        const TAB_CONFIG = {
+            grants: {
+                label: 'Foundation Grants',
+                table: 'grants',
+                fts: 'fts_grants',
+                nameCol: 'recipient_name',
+                amountCol: 'amount',
+                stateCol: 'recipient_state',
+                yearCol: 'tax_year',
+                backUrl: '/explore/grants.html',
+                columns: 'id, object_id, ein, grant_type, recipient_name, recipient_city, recipient_state, amount, tax_year',
+            },
+            daf: {
+                label: 'DAF Grants',
+                table: 'schedule_i_grants',
+                fts: 'fts_daf',
+                nameCol: 'recipient_name',
+                amountCol: 'amount',
+                stateCol: 'recipient_state',
+                yearCol: 'tax_year',
+                backUrl: '/explore/daf.html',
+                columns: 'id, funder_ein, funder_name, tax_year, grant_type, recipient_name, recipient_city, recipient_state, amount',
+            },
+            charity: {
+                label: 'Public Charity Grants',
+                table: 'schedule_i_990',
+                fts: 'fts_si990',
+                nameCol: 'recipient_name',
+                amountCol: 'cash_grant_amt',
+                stateCol: 'recipient_state',
+                yearCol: null,
+                backUrl: '/explore/grants.html',
+                columns: 'id, object_id, ein, recipient_name, recipient_ein, recipient_city, recipient_state, cash_grant_amt, purpose',
+            },
+            orgs: {
+                label: 'Organizations',
+                table: 'returns',
+                fts: 'fts_returns',
+                nameCol: 'org_name',
+                amountCol: 'total_revenue',
+                stateCol: 'state',
+                yearCol: 'tax_year',
+                backUrl: '/explore/990.html',
+                columns: 'object_id, ein, return_type, org_name, state, tax_year, total_revenue, total_expenses, total_assets_eoy',
+            },
+        };
+
+        // Build WHERE clause from FTS query (sanitized to prevent syntax errors)
+        function buildSearchWhere(cfg, q) {
+            const einClean = q.replace(/[^0-9]/g, '');
+            if (/^\d{9}$/.test(einClean) && q.replace(/[-\s]/g, '').length <= 10) {
+                return `ein = '${einClean}'`;
+            }
+            const ftsQ = sanitizeFTS(q);
+            if (ftsQ) {
+                return `rowid IN (SELECT rowid FROM ${cfg.fts} WHERE ${cfg.fts} MATCH '${sqlEsc(ftsQ)}')`;
+            }
+            // Empty after sanitization — fall back to LIKE
+            return `${cfg.nameCol} LIKE '%${sqlEsc(q)}%'`;
+        }
+
+        // Build filter WHERE clauses
+        function buildFilterWhere(cfg) {
+            let w = '';
+            const state = document.getElementById('filterState').value;
+            const yearFrom = document.getElementById('filterYearFrom').value;
+            const yearTo = document.getElementById('filterYearTo').value;
+            const amtMin = document.getElementById('filterAmountMin').value;
+            const amtMax = document.getElementById('filterAmountMax').value;
+            const keyword = document.getElementById('filterKeyword').value.trim();
+            const grantType = document.getElementById('filterGrantType').value;
+            const returnType = document.getElementById('filterReturnType').value;
+
+            if (state && cfg.stateCol) w += ` AND ${cfg.stateCol} = '${sqlEsc(state)}'`;
+            if (yearFrom && cfg.yearCol) w += ` AND ${cfg.yearCol} >= ${parseInt(yearFrom)}`;
+            if (yearTo && cfg.yearCol) w += ` AND ${cfg.yearCol} <= ${parseInt(yearTo)}`;
+            if (amtMin && cfg.amountCol) w += ` AND ${cfg.amountCol} >= ${parseInt(amtMin)}`;
+            if (amtMax && cfg.amountCol) w += ` AND ${cfg.amountCol} <= ${parseInt(amtMax)}`;
+            if (keyword && cfg.nameCol) w += ` AND ${cfg.nameCol} LIKE '%${sqlEsc(keyword)}%'`;
+            if (grantType && currentTab !== 'orgs') w += ` AND grant_type = '${sqlEsc(grantType)}'`;
+            if (returnType && currentTab === 'orgs') w += ` AND return_type = '${sqlEsc(returnType)}'`;
+
+            return w;
+        }
+
+        // Build ORDER BY
+        function buildOrderBy(cfg) {
+            const col = cfg.amountCol;
+            switch (currentSort) {
+                case 'amount_desc': return `ORDER BY ${col} DESC`;
+                case 'amount_asc': return `ORDER BY ${col} ASC`;
+                case 'year_desc': return cfg.yearCol ? `ORDER BY ${cfg.yearCol} DESC` : `ORDER BY ${col} DESC`;
+                case 'year_asc': return cfg.yearCol ? `ORDER BY ${cfg.yearCol} ASC` : `ORDER BY ${col} ASC`;
+                default: return `ORDER BY ${col} DESC`;
+            }
+        }
+
+        // Amount chip shortcuts
+        function setAmount(min, max) {
+            document.getElementById('filterAmountMin').value = min || '';
+            document.getElementById('filterAmountMax').value = max || '';
+            document.querySelectorAll('.amount-chip').forEach(c => {
+                c.classList.toggle('active', parseInt(c.dataset.min) === min);
+            });
+            applyFilters();
+        }
+
+        // Sort
+        function setSort(sort) {
+            currentSort = sort;
+            currentPage = 1;
+            document.querySelectorAll('.sort-chip').forEach(c => c.classList.toggle('active', c.dataset.sort === sort));
+            setParams({ sort, page: null });
+            loadResults();
+        }
+
+        // Apply filters
+        function applyFilters() {
+            currentPage = 1;
+            setParams({ page: null });
+            loadResults();
+        }
+
+        // Clear filters
+        function clearFilters() {
+            document.getElementById('filterState').value = '';
+            document.getElementById('filterYearFrom').value = '';
+            document.getElementById('filterYearTo').value = '';
+            document.getElementById('filterAmountMin').value = '';
+            document.getElementById('filterAmountMax').value = '';
+            document.getElementById('filterKeyword').value = '';
+            document.getElementById('filterGrantType').value = '';
+            document.getElementById('filterReturnType').value = '';
+            document.querySelectorAll('.amount-chip').forEach(c => c.classList.remove('active'));
+            currentPage = 1;
+            loadResults();
+        }
+
+        // Badge functions
+        function grantTypeBadge(gt) {
+            if (!gt) return '';
+            if (gt === 'paid') return '<span class="badge-paid">Paid</span>';
+            if (gt === 'future') return '<span class="badge-future">Future</span>';
+            if (gt === 'exp_responsibility') return '<span class="badge-expresp">Exp. Resp.</span>';
+            if (gt === 'us_org') return '<span class="badge-us">US Org</span>';
+            if (gt === 'foreign_org') return '<span class="badge-foreign">Foreign</span>';
+            return '<span class="badge-paid">' + esc(gt) + '</span>';
+        }
+
+        function returnTypeBadge(rt) {
+            if (!rt) return '';
+            if (rt === '990') return '<span class="badge-990">990</span>';
+            if (rt === '990EZ') return '<span class="badge-990ez">990-EZ</span>';
+            if (rt === '990PF') return '<span class="badge-990pf">990-PF</span>';
+            return '<span class="badge-990">' + esc(rt) + '</span>';
+        }
+
+        // Render card based on tab
+        function renderCard(r) {
+            if (currentTab === 'grants') {
+                const loc = [r.recipient_city, r.recipient_state].filter(Boolean).join(', ');
+                return `
+                    <div class="result-card" onclick="openGrantDetail(${r.id})">
+                        <div class="card-header">
+                            <div>${grantTypeBadge(r.grant_type)}</div>
+                            <div class="money">${fmtMoney(r.amount)}</div>
+                        </div>
+                        <div class="card-title">${esc(r.recipient_name)}</div>
+                        <div class="card-meta">
+                            ${loc ? '<div class="meta-item">' + esc(loc) + '</div>' : ''}
+                            ${r.funder_name ? '<div class="meta-item">From <span>' + esc(r.funder_name) + '</span></div>' : ''}
+                            <div class="meta-item">EIN <span>${esc(r.ein)}</span></div>
+                            ${r.tax_year ? '<div class="meta-item">Tax Year <span>' + esc(r.tax_year) + '</span></div>' : ''}
+                        </div>
+                    </div>`;
+            } else if (currentTab === 'daf') {
+                const loc = [r.recipient_city, r.recipient_state].filter(Boolean).join(', ');
+                return `
+                    <div class="result-card" onclick="openDafDetail(${r.id})">
+                        <div class="card-header">
+                            <div>${grantTypeBadge(r.grant_type)}</div>
+                            <div class="money">${fmtMoney(r.amount)}</div>
+                        </div>
+                        <div class="card-title">${esc(r.recipient_name)}</div>
+                        <div class="card-meta">
+                            ${loc ? '<div class="meta-item">' + esc(loc) + '</div>' : ''}
+                            <div class="meta-item">Funder <span>${esc(r.funder_name || r.funder_ein)}</span></div>
+                        </div>
+                    </div>`;
+            } else if (currentTab === 'charity') {
+                const loc = [r.recipient_city, r.recipient_state].filter(Boolean).join(', ');
+                return `
+                    <div class="result-card" onclick="openCharityDetail(${r.id})">
+                        <div class="card-header">
+                            <div><span class="badge-paid">Schedule I</span></div>
+                            <div class="money">${fmtMoney(r.cash_grant_amt)}</div>
+                        </div>
+                        <div class="card-title">${esc(r.recipient_name)}</div>
+                        <div class="card-meta">
+                            ${loc ? '<div class="meta-item">' + esc(loc) + '</div>' : ''}
+                            ${r.funder_name ? '<div class="meta-item">From <span>' + esc(r.funder_name) + '</span></div>' : '<div class="meta-item">Funder EIN <span>' + esc(r.ein) + '</span></div>'}
+                            ${r.tax_year ? '<div class="meta-item">Tax Year <span>' + esc(r.tax_year) + '</span></div>' : ''}
+                        </div>
+                    </div>`;
+            } else if (currentTab === 'orgs') {
+                return `
+                    <div class="result-card" onclick="openOrgDetail('${esc(r.object_id)}')">
+                        <div class="card-header">
+                            <div>${returnTypeBadge(r.return_type)}${r.state ? '<span class="state-badge">' + esc(r.state) + '</span>' : ''}</div>
+                            <div class="money">${fmtMoney(r.total_revenue)}</div>
+                        </div>
+                        <div class="card-title">${esc(r.org_name)}</div>
+                        <div class="card-meta">
+                            <div class="meta-item">EIN <span>${esc(r.ein)}</span></div>
+                            <div class="meta-item">Tax Year <span>${esc(r.tax_year)}</span></div>
+                            ${r.total_assets_eoy != null ? '<div class="meta-item">Assets <span>' + fmtMoney(r.total_assets_eoy) + '</span></div>' : ''}
+                        </div>
+                    </div>`;
+            }
+            return '';
+        }
+
+        // Load results
+        async function loadResults() {
+            const cfg = TAB_CONFIG[currentTab];
+            if (!cfg || !currentQuery) return;
+
+            document.getElementById('results').innerHTML = '<div class="status">Searching...</div>';
+
+            try {
+                const searchW = buildSearchWhere(cfg, currentQuery);
+                const filterW = buildFilterWhere(cfg);
+                const orderBy = buildOrderBy(cfg);
+                const offset = (currentPage - 1) * PAGE_SIZE;
+
+                // Count query (parallel) — count directly on FTS table when no extra filters
+                let countSql;
+                if (!filterW.trim() && searchW.includes('MATCH')) {
+                    // Extract FTS match clause and count directly on FTS table (avoids materializing full result set)
+                    const ftsQ = sanitizeFTS(currentQuery);
+                    countSql = `SELECT COUNT(*) as cnt FROM ${cfg.fts} WHERE ${cfg.fts} MATCH '${sqlEsc(ftsQ)}'`;
+                } else {
+                    countSql = `SELECT COUNT(*) as cnt FROM ${cfg.table} WHERE ${searchW} ${filterW}`;
+                }
+                const countP = query(countSql);
+
+                // Data query
+                const dataSql = `SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${searchW} ${filterW} ${orderBy} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+                const [countRows, rows] = await Promise.all([countP, query(dataSql)]);
+
+                totalCount = countRows[0]?.cnt || 0;
+
+                // Update top bar
+                document.getElementById('topCount').innerHTML = `<span>${fmt(totalCount)}</span> results`;
+
+                // Batch-fetch funder names for grants
+                if (currentTab === 'grants' && rows.length) {
+                    const oids = [...new Set(rows.map(r => r.object_id))];
+                    const oidList = oids.map(o => "'" + sqlEsc(o) + "'").join(',');
+                    try {
+                        const funderRows = await query(`SELECT object_id, org_name FROM returns WHERE object_id IN (${oidList})`);
+                        const funderMap = {};
+                        for (const f of funderRows) funderMap[f.object_id] = f.org_name;
+                        for (const r of rows) r.funder_name = funderMap[r.object_id] || null;
+                    } catch (e) {
+                        console.warn('Funder name lookup failed:', e);
+                    }
+                }
+
+                // Batch-fetch funder names and tax years for charity grants
+                if (currentTab === 'charity' && rows.length) {
+                    const oids = [...new Set(rows.map(r => r.object_id).filter(Boolean))];
+                    if (oids.length) {
+                        try {
+                            const oidList = oids.map(o => "'" + sqlEsc(o) + "'").join(',');
+                            const infoRows = await query(`SELECT object_id, org_name, tax_year FROM returns WHERE object_id IN (${oidList})`);
+                            const infoMap = {};
+                            for (const f of infoRows) infoMap[f.object_id] = f;
+                            for (const r of rows) {
+                                const info = infoMap[r.object_id];
+                                if (info) { r.funder_name = info.org_name; r.tax_year = info.tax_year; }
+                            }
+                        } catch (e) {
+                            console.warn('Charity funder lookup failed:', e);
+                        }
+                    }
+                }
+
+                // Render
+                if (!rows.length) {
+                    document.getElementById('results').innerHTML = '<div class="empty-state">No results match your filters. Try broadening your search.</div>';
+                    document.getElementById('pagination').innerHTML = '';
+                    return;
+                }
+
+                let html = `<div class="status"><span class="count">${fmt(totalCount)}</span> results &mdash; page ${currentPage} of ${Math.ceil(totalCount / PAGE_SIZE)}</div>`;
+                for (const r of rows) html += renderCard(r);
+                document.getElementById('results').innerHTML = html;
+
+                // Pagination
+                renderPagination(totalCount);
+
+                // CSV link
+                const csvSql = `SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${searchW} ${filterW} ${orderBy} LIMIT 10000`;
+                document.getElementById('csvLink').href = `${API}.csv?sql=${encodeURIComponent(csvSql)}`;
+
+            } catch (e) {
+                // FTS failed despite sanitization — LIKE fallback (should rarely trigger)
+                try {
+                    const fallbackW = `${cfg.nameCol} LIKE '%${sqlEsc(currentQuery)}%'`;
+                    const filterW = buildFilterWhere(cfg);
+                    const orderBy = buildOrderBy(cfg);
+                    const offset = (currentPage - 1) * PAGE_SIZE;
+
+                    const [countRows, rows] = await Promise.all([
+                        query(`SELECT COUNT(*) as cnt FROM ${cfg.table} WHERE ${fallbackW} ${filterW}`),
+                        query(`SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${fallbackW} ${filterW} ${orderBy} LIMIT ${PAGE_SIZE} OFFSET ${offset}`)
+                    ]);
+                    totalCount = countRows[0]?.cnt || 0;
+                    document.getElementById('topCount').innerHTML = `<span>${fmt(totalCount)}</span> results`;
+
+                    if (!rows.length) {
+                        document.getElementById('results').innerHTML = '<div class="empty-state">No results found.</div>';
+                        document.getElementById('pagination').innerHTML = '';
+                        return;
+                    }
+
+                    let html = `<div class="status"><span class="count">${fmt(totalCount)}</span> results &mdash; page ${currentPage}</div>`;
+                    for (const r of rows) html += renderCard(r);
+                    document.getElementById('results').innerHTML = html;
+                    renderPagination(totalCount);
+                } catch (e2) {
+                    document.getElementById('results').innerHTML = `<div class="status">Error: ${esc(e2.message)}</div>`;
+                }
+            }
+        }
+
+        // Pagination
+        function renderPagination(total) {
+            const totalPages = Math.ceil(total / PAGE_SIZE);
+            if (totalPages <= 1) { document.getElementById('pagination').innerHTML = ''; return; }
+
+            let html = '';
+            html += `<button class="page-btn ${currentPage === 1 ? 'disabled' : ''}" onclick="goPage(${currentPage - 1})">&laquo;</button>`;
+
+            const pages = [];
+            pages.push(1);
+            if (currentPage > 3) pages.push('...');
+            for (let p = Math.max(2, currentPage - 1); p <= Math.min(totalPages - 1, currentPage + 1); p++) pages.push(p);
+            if (currentPage < totalPages - 2) pages.push('...');
+            if (totalPages > 1) pages.push(totalPages);
+
+            for (const p of pages) {
+                if (p === '...') {
+                    html += '<span class="page-ellipsis">&hellip;</span>';
+                } else {
+                    html += `<button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="goPage(${p})">${p}</button>`;
+                }
+            }
+
+            html += `<button class="page-btn ${currentPage === totalPages ? 'disabled' : ''}" onclick="goPage(${currentPage + 1})">&raquo;</button>`;
+            document.getElementById('pagination').innerHTML = html;
+        }
+
+        function goPage(page) {
+            const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            setParams({ page: page > 1 ? page : null });
+            loadResults();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Detail panels
+        async function openGrantDetail(grantId) {
+            document.getElementById('detailOverlay').classList.add('open');
+            document.getElementById('detailPanel').classList.add('open');
+            document.getElementById('detailContent').innerHTML = '<div class="status">Loading...</div>';
+            setParams({ detail: grantId });
+
+            try {
+                const [g] = await query(`SELECT g.*, r.org_name AS funder_name FROM grants g LEFT JOIN returns r ON g.object_id = r.object_id WHERE g.id = ${grantId}`);
+                if (!g) { document.getElementById('detailContent').innerHTML = '<div class="status">Grant not found</div>'; return; }
+
+                const loc = [g.recipient_city, g.recipient_state, g.recipient_country].filter(Boolean).join(', ');
+                document.getElementById('detailHeader').innerHTML = `<div style="margin-bottom:0.5rem">${grantTypeBadge(g.grant_type)}</div><div class="detail-title">${esc(g.recipient_name)}</div><div class="detail-subtitle">${fmtMoney(g.amount)} grant${loc ? ' &middot; ' + esc(loc) : ''}</div>`;
+
+                let html = '<div class="section-title">Grant Details</div><div class="detail-grid">';
+                html += `<div class="detail-item"><div class="label">Amount</div><div class="value large">${fmtMoney(g.amount)}</div></div>`;
+                html += `<div class="detail-item"><div class="label">Grant Type</div><div class="value">${esc(g.grant_type)}</div></div>`;
+                if (g.purpose) html += `<div class="detail-item" style="grid-column:span 2"><div class="label">Purpose</div><div class="value">${esc(g.purpose)}</div></div>`;
+                if (loc) html += `<div class="detail-item"><div class="label">Location</div><div class="value">${esc(loc)}</div></div>`;
+                html += '</div>';
+                html += '<div class="section-title">Funder</div><div class="detail-grid">';
+                html += `<div class="detail-item"><div class="label">Funder</div><div class="value">${esc(g.funder_name || 'Unknown')}</div></div>`;
+                html += `<div class="detail-item"><div class="label">EIN</div><div class="value">${esc(g.ein)}</div></div>`;
+                html += '</div>';
+                html += `<div style="margin-top:1rem"><a href="/990data_public/grants/${grantId}" target="_blank" class="doc-link">Raw Record &rarr;</a></div>`;
+                document.getElementById('detailContent').innerHTML = html;
+            } catch (e) {
+                document.getElementById('detailContent').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
+            }
+        }
+
+        async function openDafDetail(grantId) {
+            document.getElementById('detailOverlay').classList.add('open');
+            document.getElementById('detailPanel').classList.add('open');
+            document.getElementById('detailContent').innerHTML = '<div class="status">Loading...</div>';
+            setParams({ detail: grantId });
+
+            try {
+                const [g] = await query(`SELECT * FROM schedule_i_grants WHERE id = ${grantId}`);
+                if (!g) { document.getElementById('detailContent').innerHTML = '<div class="status">Grant not found</div>'; return; }
+
+                const loc = [g.recipient_city, g.recipient_state].filter(Boolean).join(', ');
+                document.getElementById('detailHeader').innerHTML = `<div style="margin-bottom:0.5rem">${grantTypeBadge(g.grant_type)}</div><div class="detail-title">${esc(g.recipient_name)}</div><div class="detail-subtitle">${fmtMoney(g.amount)} grant${loc ? ' &middot; ' + esc(loc) : ''}</div>`;
+
+                let html = '<div class="section-title">Grant Details</div><div class="detail-grid">';
+                html += `<div class="detail-item"><div class="label">Amount</div><div class="value large">${fmtMoney(g.amount)}</div></div>`;
+                html += `<div class="detail-item"><div class="label">Grant Type</div><div class="value">${esc(g.grant_type)}</div></div>`;
+                if (g.tax_year) html += `<div class="detail-item"><div class="label">Tax Year</div><div class="value">${esc(g.tax_year)}</div></div>`;
+                if (g.purpose) html += `<div class="detail-item" style="grid-column:span 2"><div class="label">Purpose</div><div class="value">${esc(g.purpose)}</div></div>`;
+                html += '</div>';
+                html += `<div class="detail-item"><div class="label">Funder EIN</div><div class="value">${esc(g.funder_ein)}</div></div>`;
+                html += `<div style="margin-top:1rem"><a href="/990data_public/schedule_i_grants/${grantId}" target="_blank" class="doc-link">Raw Record &rarr;</a></div>`;
+                document.getElementById('detailContent').innerHTML = html;
+            } catch (e) {
+                document.getElementById('detailContent').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
+            }
+        }
+
+        async function openCharityDetail(grantId) {
+            document.getElementById('detailOverlay').classList.add('open');
+            document.getElementById('detailPanel').classList.add('open');
+            document.getElementById('detailContent').innerHTML = '<div class="status">Loading...</div>';
+            setParams({ detail: grantId });
+
+            try {
+                const [g] = await query(`SELECT si.*, r.org_name AS funder_name, r.tax_year FROM schedule_i_990 si LEFT JOIN returns r ON si.object_id = r.object_id WHERE si.id = ${grantId}`);
+                if (!g) { document.getElementById('detailContent').innerHTML = '<div class="status">Grant not found</div>'; return; }
+
+                const loc = [g.recipient_city, g.recipient_state].filter(Boolean).join(', ');
+                document.getElementById('detailHeader').innerHTML = `<div style="margin-bottom:0.5rem"><span class="badge-paid">Schedule I</span></div><div class="detail-title">${esc(g.recipient_name)}</div><div class="detail-subtitle">${fmtMoney(g.cash_grant_amt)} grant${loc ? ' &middot; ' + esc(loc) : ''}</div>`;
+
+                let html = '<div class="section-title">Grant Details</div><div class="detail-grid">';
+                html += `<div class="detail-item"><div class="label">Cash Amount</div><div class="value large">${fmtMoney(g.cash_grant_amt)}</div></div>`;
+                if (g.non_cash_amt) html += `<div class="detail-item"><div class="label">Non-Cash Amount</div><div class="value">${fmtMoney(g.non_cash_amt)}</div></div>`;
+                if (g.tax_year) html += `<div class="detail-item"><div class="label">Tax Year</div><div class="value">${esc(g.tax_year)}</div></div>`;
+                if (g.irc_section) html += `<div class="detail-item"><div class="label">IRC Section</div><div class="value">${esc(g.irc_section)}</div></div>`;
+                if (g.purpose) html += `<div class="detail-item" style="grid-column:span 2"><div class="label">Purpose</div><div class="value">${esc(g.purpose)}</div></div>`;
+                if (loc) html += `<div class="detail-item"><div class="label">Location</div><div class="value">${esc(loc)}</div></div>`;
+                html += '</div>';
+                html += '<div class="section-title">Funder</div><div class="detail-grid">';
+                html += `<div class="detail-item"><div class="label">Funder</div><div class="value">${esc(g.funder_name || 'Unknown')}</div></div>`;
+                html += `<div class="detail-item"><div class="label">EIN</div><div class="value">${esc(g.ein)}</div></div>`;
+                html += '</div>';
+                if (g.recipient_ein) {
+                    html += '<div class="section-title">Recipient</div><div class="detail-grid">';
+                    html += `<div class="detail-item"><div class="label">Recipient EIN</div><div class="value">${esc(g.recipient_ein)}</div></div>`;
+                    html += '</div>';
+                }
+                html += `<div style="margin-top:1rem"><a href="/990data_public/schedule_i_990/${grantId}" target="_blank" class="doc-link">Raw Record &rarr;</a></div>`;
+                document.getElementById('detailContent').innerHTML = html;
+            } catch (e) {
+                document.getElementById('detailContent').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
+            }
+        }
+
+        async function openOrgDetail(objectId) {
+            document.getElementById('detailOverlay').classList.add('open');
+            document.getElementById('detailPanel').classList.add('open');
+            document.getElementById('detailContent').innerHTML = '<div class="status">Loading...</div>';
+            setParams({ detail: objectId });
+
+            try {
+                const [r] = await query(`SELECT * FROM returns WHERE object_id = '${sqlEsc(objectId)}'`);
+                if (!r) { document.getElementById('detailContent').innerHTML = '<div class="status">Filing not found</div>'; return; }
+
+                document.getElementById('detailHeader').innerHTML = `<div style="margin-bottom:0.5rem">${returnTypeBadge(r.return_type)}</div><div class="detail-title">${esc(r.org_name)}</div><div class="detail-subtitle">EIN ${esc(r.ein)} &middot; Tax Year ${esc(r.tax_year)}${r.state ? ' &middot; ' + esc(r.state) : ''}</div>`;
+
+                let html = '<div class="section-title">Financials</div><div class="detail-grid">';
+                html += `<div class="detail-item"><div class="label">Total Revenue</div><div class="value large">${fmtMoney(r.total_revenue)}</div></div>`;
+                html += `<div class="detail-item"><div class="label">Total Expenses</div><div class="value large">${fmtMoney(r.total_expenses)}</div></div>`;
+                if (r.total_assets_eoy != null) html += `<div class="detail-item"><div class="label">Total Assets</div><div class="value">${fmtMoney(r.total_assets_eoy)}</div></div>`;
+                if (r.net_assets_eoy != null) html += `<div class="detail-item"><div class="label">Net Assets</div><div class="value">${fmtMoney(r.net_assets_eoy)}</div></div>`;
+                html += '</div>';
+                html += '<div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:0.5rem">';
+                html += `<a href="/explore/grants.html?q=${encodeURIComponent(r.ein)}" class="doc-link">Grants &rarr;</a>`;
+                html += `<a href="/explore/bmf.html?q=${encodeURIComponent(r.ein)}&detail=${encodeURIComponent(r.ein)}" class="doc-link">BMF &rarr;</a>`;
+                html += `<a href="/990data_public/returns/${esc(r.object_id)}" target="_blank" class="doc-link">Raw Record &rarr;</a>`;
+                html += '</div>';
+                document.getElementById('detailContent').innerHTML = html;
+            } catch (e) {
+                document.getElementById('detailContent').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
+            }
+        }
+
+        function closeDetail() {
+            document.getElementById('detailOverlay').classList.remove('open');
+            document.getElementById('detailPanel').classList.remove('open');
+            setParams({ detail: null });
+        }
+
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+
+        // Populate state dropdown
+        const STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','PR','RI','SC','SD','TN','TX','UT','VT','VA','VI','WA','WV','WI','WY'];
+        const sel = document.getElementById('filterState');
+        for (const s of STATES) { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); }
+
+        // Init
+        (function init() {
+            currentTab = getParam('tab') || 'grants';
+            currentQuery = getParam('q') || '';
+            currentSort = getParam('sort') || (currentTab === 'orgs' ? 'year_desc' : 'amount_desc');
+            currentPage = parseInt(getParam('page')) || 1;
+
+            const cfg = TAB_CONFIG[currentTab];
+            if (!cfg) { document.getElementById('results').innerHTML = '<div class="empty-state">Unknown tab type.</div>'; return; }
+
+            // Configure UI for tab type
+            document.getElementById('backLink').href = cfg.backUrl + (currentQuery ? '?q=' + encodeURIComponent(currentQuery) : '');
+            document.getElementById('topTitle').innerHTML = `<span class="query-term">"${esc(currentQuery)}"</span> in ${cfg.label}`;
+
+            // Show/hide tab-specific filters
+            document.getElementById('grantTypeSection').style.display = currentTab !== 'orgs' ? '' : 'none';
+            document.getElementById('returnTypeSection').style.display = currentTab === 'orgs' ? '' : 'none';
+
+            // Sort chips
+            document.querySelectorAll('.sort-chip').forEach(c => c.classList.toggle('active', c.dataset.sort === currentSort));
+
+            if (currentQuery) loadResults();
+
+            const detail = getParam('detail');
+            if (detail) {
+                if (currentTab === 'grants') openGrantDetail(Number(detail));
+                else if (currentTab === 'daf') openDafDetail(Number(detail));
+                else if (currentTab === 'charity') openCharityDetail(Number(detail));
+                else if (currentTab === 'orgs') openOrgDetail(detail);
+            }
+        })();
+    </script>
+</body>
+</html>

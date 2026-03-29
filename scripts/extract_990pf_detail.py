@@ -96,6 +96,11 @@ CREATE TABLE IF NOT EXISTS grants (
 CREATE INDEX IF NOT EXISTS idx_grants_oid ON grants(object_id);
 CREATE INDEX IF NOT EXISTS idx_grants_ein ON grants(ein);
 CREATE INDEX IF NOT EXISTS idx_grants_type ON grants(grant_type);
+CREATE INDEX IF NOT EXISTS idx_grants_amount ON grants(amount);
+CREATE INDEX IF NOT EXISTS idx_grants_ein_recip ON grants(ein, recipient_name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_grants_recip_type ON grants(recipient_name COLLATE NOCASE, grant_type);
+-- NOTE: idx_grants_year_amount on (tax_year, amount DESC) deferred until
+-- tax_year column is added to grants table (full rebuild TODO)
 
 -- Officers / Directors / Trustees
 CREATE TABLE IF NOT EXISTS officers (

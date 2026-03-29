@@ -61,6 +61,9 @@
     {% endif %}
   </div>
   {% endif %}
+  <div style="margin-top: 1rem;">
+    <a href="https://forms.datadawn.org/{{ object_id }}.html" class="view-form-btn" target="_blank" style="display:inline-block; background: linear-gradient(135deg, var(--dawn-amber, #f59e0b), var(--dawn-rose, #fb923c)); color: #0a0e1a; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; font-weight: 500; padding: 0.7rem 1.5rem; border-radius: 8px; text-decoration: none; letter-spacing: 0.05em; text-transform: uppercase;">View Full Form &rarr;</a>
+  </div>
 </div>
 
 <div class="section">
@@ -129,7 +132,7 @@
   </div>
 </div>
 
-{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.compensation, o.benefits FROM officers o WHERE o.object_id = :object_id ORDER BY o.compensation DESC", {"object_id": object_id}, database="990data_public") %}
+{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.compensation, o.benefits FROM officers o WHERE o.object_id = :object_id ORDER BY o.compensation DESC LIMIT 200", {"object_id": object_id}, database="990data_public") %}
 
 {% if officers %}
 <div class="section">
@@ -265,7 +268,7 @@
 </div>
 {% endif %}
 
-{% set investments = sql("SELECT i.investment_type, i.description, i.book_value, i.fmv, i.cost_basis FROM investments i WHERE i.object_id = :object_id ORDER BY i.fmv DESC", {"object_id": object_id}, database="990data_public") %}
+{% set investments = sql("SELECT i.investment_type, i.description, i.book_value, i.fmv, i.cost_basis FROM investments i WHERE i.object_id = :object_id ORDER BY i.fmv DESC LIMIT 500", {"object_id": object_id}, database="990data_public") %}
 
 {% if investments %}
 <div class="section">
@@ -295,7 +298,7 @@
 </div>
 {% endif %}
 
-{% set cap_gains = sql("SELECT cg.property_desc, cg.how_acquired, cg.acquired_date, cg.sold_date, cg.gross_sale_price, cg.cost_basis, cg.gain_or_loss FROM capital_gains cg WHERE cg.object_id = :object_id ORDER BY cg.gain_or_loss DESC", {"object_id": object_id}, database="990data_public") %}
+{% set cap_gains = sql("SELECT cg.property_desc, cg.how_acquired, cg.acquired_date, cg.sold_date, cg.gross_sale_price, cg.cost_basis, cg.gain_or_loss FROM capital_gains cg WHERE cg.object_id = :object_id ORDER BY cg.gain_or_loss DESC LIMIT 500", {"object_id": object_id}, database="990data_public") %}
 
 {% if cap_gains %}
 <div class="section">

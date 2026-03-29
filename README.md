@@ -1,6 +1,6 @@
 # 990database
 
-A comprehensive database of IRS Form 990 nonprofit filings: financial returns, foundation grants, officer compensation, DAF disbursements, investments, and more. Nearly 5 million filings covering 1.9 million organizations, extracted from the IRS bulk XML e-file archives. All from official government sources. All public domain.
+A comprehensive database of IRS Form 990 nonprofit filings: financial returns, foundation grants, officer compensation, DAF disbursements, investments, and more. Over 5.2 million filings covering 1.9 million organizations, extracted from the IRS bulk XML e-file archives. All from official government sources. All public domain.
 
 Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ Crabdaddy ([Claude Code](https://docs.anthropic.com/en/docs/claude-code)) 🦀
 
@@ -12,11 +12,11 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 
 | Table | Records | Description |
 |-------|---------|-------------|
-| `returns` | 4,988,007 | 990/990-PF/990-EZ filings (tax years 2014–2025) |
-| `grants` | 12,495,618 | 990-PF grants paid, future grants, expenditure responsibility |
-| `officers` | 42,359,016 | Officers, directors, trustees, key employees |
+| `returns` | 5,210,981 | 990/990-PF/990-EZ filings (tax years 2014–2025) |
+| `grants` | 13,609,220 | 990-PF grants paid, future grants, expenditure responsibility |
+| `officers` | 44,762,634 | Officers, directors, trustees, key employees |
 | `schedule_i_990` | 6,393,046 | Schedule I grants (990/990-EZ filers) |
-| `schedule_i_grants` | 1,253,204 | DAF and intermediary grant disbursements |
+| `schedule_i_grants` | 1,272,399 | DAF and intermediary grant disbursements |
 | `related_orgs` | 8,540,764 | Related organizations (Schedule R) |
 | `capital_gains` | 22,774,992 | 990-PF capital gains/losses (Part IV) |
 | `investments` | 5,228,704 | 990-PF investments (Part II) |
@@ -27,7 +27,7 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 | `top_employees` | 74,260 | Highest-compensated employees (990/990-EZ) |
 | `bmf` | 1,935,635 | IRS Business Master File (NTEE codes, subsection, status) |
 
-**Total**: ~100.5 million records across 14 tables.
+**Total**: ~114 million records across 14 tables.
 
 ---
 
