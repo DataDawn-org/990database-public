@@ -449,13 +449,22 @@ fi
 log "--- Step 5: Upload to Datasette server ---"
 STEP5_START=$(date +%s)
 
-if dry "Would upload $PUBLIC_DB → $REMOTE_HOST:$REMOTE_DB_PATH"; then
-    log "[DRY-RUN] Would upload ${PUBLIC_SIZE_MB:-?}MB to $REMOTE_HOST"
+if dry "Would upload $PUBLIC_DB → $REMOTE_HOST:${REMOTE_DB_PATH}.new, then atomic mv to $REMOTE_DB_PATH"; then
+    log "[DRY-RUN] Would upload ${PUBLIC_SIZE_MB:-?}MB to $REMOTE_HOST (via .new + mv)"
     log "[DRY-RUN] Would restart Datasette"
 else
-    log "Uploading to $REMOTE_HOST..."
-    scp -q "$PUBLIC_DB" "$REMOTE_HOST:$REMOTE_DB_PATH"
-    log "Upload complete"
+    # Upload strategy: write to "${REMOTE_DB_PATH}.new", then atomic mv on success.
+    # Never upload directly to the live filename — see openregs/deploy/deploy.sh
+    # comment block and bestpractices/deploy_guide.md "Critical Rules" for the
+    # full explanation. Short version: rsync -aP and scp can both leave the live
+    # DB in a corrupt half-written state if interrupted mid-transfer. Uploading
+    # to ".new" guarantees the live file is never touched until the upload is
+    # verified-complete on the remote side.
+    log "Uploading to $REMOTE_HOST:${REMOTE_DB_PATH}.new..."
+    rsync -a --partial-dir=.rsync-partials --progress --timeout=600 "$PUBLIC_DB" "$REMOTE_HOST:${REMOTE_DB_PATH}.new"
+    log "Upload complete — atomically replacing live database..."
+    ssh "$REMOTE_HOST" "mv ${REMOTE_DB_PATH}.new ${REMOTE_DB_PATH}"
+    log "Database swap complete"
 
     # Deploy detail page templates and static assets
     log "Deploying templates and static assets..."
