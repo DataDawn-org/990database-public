@@ -33,6 +33,7 @@ movement_*.py
 # Secrets and credentials
 .env
 .env.*
+scripts/config.json
 
 # Python
 __pycache__/
