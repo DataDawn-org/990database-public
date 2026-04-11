@@ -113,12 +113,23 @@ fi
 
 mkdir -p "$EXTRACTED_DIR"
 
-# ── Step 0: Git backup of server state ───────────────────────────────────
-log "--- Step 0: Git backup of current server state ---"
+# ── Step 0: Git backup of server state (optional) ───────────────────────
+# This step was added assuming /opt/datasette would be tracked in a private
+# git repo, but that setup was never completed on the VPS — /opt/datasette
+# has no .git directory. Previously this step aborted the entire pipeline
+# on every run (set -e + ssh failure), causing the monthly cron to silently
+# fail since it was added. Now gracefully skipped when .git is absent so
+# the rest of the pipeline can run. To re-enable, initialize a git repo at
+# /opt/datasette on the VPS and set up an upstream remote.
+log "--- Step 0: Git backup of current server state (optional) ---"
 if ! dry "Would commit current server state to git"; then
-    BACKUP_MSG="Pre-update backup: $(date '+%Y-%m-%d %H:%M:%S')"
-    ssh "$REMOTE_HOST" "cd /opt/datasette && git add -A && { git diff --cached --quiet && echo 'No changes to backup' || { git commit -m \"$BACKUP_MSG\" && git push origin main; }; }" 2>>"$LOG_FILE"
-    log "Git backup complete"
+    if ssh "$REMOTE_HOST" "test -d /opt/datasette/.git" 2>/dev/null; then
+        BACKUP_MSG="Pre-update backup: $(date '+%Y-%m-%d %H:%M:%S')"
+        ssh "$REMOTE_HOST" "cd /opt/datasette && git add -A && { git diff --cached --quiet && echo 'No changes to backup' || { git commit -m \"$BACKUP_MSG\" && git push origin main; }; }" 2>>"$LOG_FILE" || log "WARNING: git backup failed (continuing anyway)"
+        log "Git backup complete"
+    else
+        log "Skipping git backup (/opt/datasette has no .git on VPS)"
+    fi
 fi
 
 # ── Step 1: Determine date range ──────────────────────────────────────────
