@@ -93,8 +93,8 @@ CREATE TABLE IF NOT EXISTS grants (
     grant_date            TEXT,       -- exp_responsibility only
     expended_amount       INTEGER     -- exp_responsibility only
 );
-CREATE INDEX IF NOT EXISTS idx_grants_oid ON grants(object_id);
-CREATE INDEX IF NOT EXISTS idx_grants_ein ON grants(ein);
+-- idx_grants_oid removed 2026-04-11: subset of idx_grants_oid_type (added in update.sh)
+-- idx_grants_ein removed 2026-04-11: subset of idx_grants_ein_type and idx_grants_ein_recip
 CREATE INDEX IF NOT EXISTS idx_grants_type ON grants(grant_type);
 CREATE INDEX IF NOT EXISTS idx_grants_amount ON grants(amount);
 CREATE INDEX IF NOT EXISTS idx_grants_ein_recip ON grants(ein, recipient_name COLLATE NOCASE);

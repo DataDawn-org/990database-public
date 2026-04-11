@@ -338,7 +338,7 @@ else
         UPDATE grants SET tax_year = (
             SELECT r.tax_year FROM returns r WHERE r.object_id = grants.object_id
         );
-        CREATE INDEX IF NOT EXISTS idx_grants_year ON grants(tax_year);
+        -- idx_grants_year removed 2026-04-11: subset of idx_grants_year_amount (created later in this script)
 SQL
     GRANTS_WITH_YEAR=$(sqlite3 "$PUBLIC_DB" "SELECT COUNT(*) FROM grants WHERE tax_year IS NOT NULL")
     GRANTS_TOTAL=$(sqlite3 "$PUBLIC_DB" "SELECT COUNT(*) FROM grants")
@@ -430,6 +430,13 @@ SQL
     # VACUUM to reclaim space from dropped tables
     log "VACUUMing public database..."
     sqlite3 "$PUBLIC_DB" "VACUUM;"
+
+    # Run ANALYZE so the query planner has statistics — without it, the planner
+    # falls back to structural rules and can pick suboptimal plans (e.g., using
+    # a low-cardinality index like idx_return_type when a full scan would be
+    # faster). Added 2026-04-11 as part of the index cleanup pass.
+    log "Running ANALYZE for query planner statistics..."
+    sqlite3 "$PUBLIC_DB" "ANALYZE;"
 
     PUBLIC_SIZE=$(stat --format="%s" "$PUBLIC_DB" 2>/dev/null || stat -f "%z" "$PUBLIC_DB")
     PUBLIC_SIZE_MB=$(( PUBLIC_SIZE / 1048576 ))

@@ -64,7 +64,7 @@ def create_schema(con):
             source_file          TEXT,
             parse_error          TEXT
         );
-        CREATE INDEX IF NOT EXISTS idx_ein         ON returns(ein);
+        -- idx_ein removed 2026-04-11: subset of idx_returns_ein_type and idx_returns_ein_year_oid
         CREATE INDEX IF NOT EXISTS idx_return_type ON returns(return_type);
         CREATE INDEX IF NOT EXISTS idx_tax_year    ON returns(tax_year);
     """)

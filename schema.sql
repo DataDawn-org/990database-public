@@ -39,7 +39,7 @@ CREATE TABLE returns (
     min_investment_return     INTEGER,
     excess_distribution_cyov  INTEGER
 );
-CREATE INDEX idx_ein                ON returns(ein);
+-- idx_ein removed 2026-04-11: subset of idx_returns_ein_type and idx_returns_ein_year_oid
 CREATE INDEX idx_return_type        ON returns(return_type);
 CREATE INDEX idx_tax_year           ON returns(tax_year);
 CREATE INDEX idx_returns_ein_type   ON returns(ein, return_type);
@@ -63,13 +63,13 @@ CREATE TABLE grants (
     expended_amount       INTEGER,        -- exp_responsibility only
     tax_year              INTEGER         -- denormalized from returns for sort/filter
 );
-CREATE INDEX idx_grants_oid          ON grants(object_id);
-CREATE INDEX idx_grants_ein          ON grants(ein);
+-- idx_grants_oid removed 2026-04-11: subset of idx_grants_oid_type
+-- idx_grants_ein removed 2026-04-11: subset of idx_grants_ein_type and idx_grants_ein_recip
 CREATE INDEX idx_grants_type         ON grants(grant_type);
-CREATE INDEX idx_grants_recip_upper  ON grants(recipient_name COLLATE NOCASE);
+-- idx_grants_recip_upper removed 2026-04-11: subset of idx_grants_recip_type
 CREATE INDEX idx_grants_ein_type     ON grants(ein, grant_type);
 CREATE INDEX idx_grants_oid_type     ON grants(object_id, grant_type);
-CREATE INDEX idx_grants_year         ON grants(tax_year);
+-- idx_grants_year removed 2026-04-11: subset of idx_grants_year_amount
 CREATE INDEX idx_grants_year_amount  ON grants(tax_year, amount DESC);
 CREATE INDEX idx_grants_ein_recip    ON grants(ein, recipient_name COLLATE NOCASE);
 CREATE INDEX idx_grants_recip_type   ON grants(recipient_name COLLATE NOCASE, grant_type);
