@@ -418,6 +418,52 @@ SQL
 SQL
     log "FTS5 indexes built"
 
+    # Verify every expected FTS table is present and populated. This catches
+    # the class of silent breakage where update.sh "succeeds" but an FTS table
+    # never actually got built — e.g. fts_si990 and fts_officers went missing
+    # on 2026-04-11 because the pipeline was aborting at Step 0 before any
+    # rebuild could run, and live search had been broken for weeks with no
+    # visible signal. Die on any mismatch so a broken DB cannot be deployed.
+    log "Verifying FTS5 indexes..."
+    python3 - "$PUBLIC_DB" <<'PYEOF' || die "FTS verification failed — refusing to deploy broken DB"
+import sqlite3, sys
+db = sys.argv[1]
+conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+expected = {
+    "fts_returns":  "returns",
+    "fts_grants":   "grants",
+    "fts_daf":      "schedule_i_grants",
+    "fts_si990":    "schedule_i_990",
+    "fts_bmf":      "bmf",
+    "fts_officers": "officers",
+}
+failures = []
+for fts, base in expected.items():
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (fts,)
+    ).fetchone()
+    if not row:
+        failures.append(f"{fts}: MISSING")
+        continue
+    try:
+        fts_count = conn.execute(f"SELECT COUNT(*) FROM {fts}").fetchone()[0]
+    except sqlite3.DatabaseError as e:
+        failures.append(f"{fts}: BROKEN ({e})")
+        continue
+    base_count = conn.execute(f"SELECT COUNT(*) FROM {base}").fetchone()[0]
+    if base_count > 0 and fts_count < base_count * 0.95:
+        failures.append(f"{fts}: only {fts_count:,}/{base_count:,} rows ({fts_count/base_count:.1%})")
+    else:
+        print(f"  OK {fts}: {fts_count:,} rows")
+if failures:
+    print("FTS VERIFICATION FAILED:", file=sys.stderr)
+    for f in failures:
+        print(f"  {f}", file=sys.stderr)
+    sys.exit(1)
+print("All 6 FTS tables verified present and populated")
+PYEOF
+    log "FTS verification passed"
+
     # Ensure performance indexes exist (safety net — these should carry over
     # from 990data.db, but recreate if missing after table drops or schema changes)
     log "Verifying performance indexes..."
