@@ -618,6 +618,12 @@ log "========================================="
 # ── Step 7: Auto-commit server config to git ─────────────────────────────
 log "--- Step 7: Git auto-commit ---"
 if ! dry "Would auto-commit server config changes"; then
-    ssh "$REMOTE_HOST" 'cd /opt/datasette && git add -A && git diff --cached --quiet || git commit -m "Auto: $(date +%Y-%m-%d) data update" && git push origin main' 2>>"$LOG_FILE"
-    log "Git auto-commit complete"
+    # Data is already deployed at this point — a git push failure here is a
+    # warning, not a fatal error. Without the `|| log` wrapper a transient
+    # network blip would abort the script after all real work is done.
+    if ssh "$REMOTE_HOST" 'cd /opt/datasette && git add -A && git diff --cached --quiet || git commit -m "Auto: $(date +%Y-%m-%d) data update" && git push origin main' 2>>"$LOG_FILE"; then
+        log "Git auto-commit complete"
+    else
+        log "WARNING: git auto-commit failed (data already deployed; investigate push state)"
+    fi
 fi
