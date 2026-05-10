@@ -103,7 +103,7 @@ elapsed() {
 #   5. Rotates B2 to last 3 (inline)
 #
 # F-005 from 2026-04-26 DR drill: the openregs path got this propagation
-# 2026-04-25; 990 had only daily mnt-data sync + local 990data_prev.db until
+# 2026-04-25; 990 had only daily mnt-data sync + local 990data_source_snapshot.db until
 # now, so a failed 990 monthly couldn't roll back to anything else. This
 # closes the gap.
 #
@@ -341,7 +341,7 @@ log "--- Step 3: Parse new filings ---"
 STEP3_START=$(date +%s)
 
 # Backup database before modifying
-BACKUP_DB="$PROJECT_DIR/990data_prev.db"
+BACKUP_DB="$PROJECT_DIR/990data_source_snapshot.db"
 log "Backing up $DB → $BACKUP_DB"
 if ! dry "Would backup $DB"; then
     cp "$DB" "$BACKUP_DB"
@@ -575,23 +575,13 @@ PYEOF
     # Added 2026-05-10 after schedule_i_grants silently dropped from 1.27M to 14,890
     # rows on the 2026-05-01 build (stale source_file paths in returns).
     log "Verifying critical-table row-count floors..."
-    python3 - "$PUBLIC_DB" <<'PYEOF' || die "Critical-table floor check failed — refusing to deploy"
-import sqlite3, sys
-db = sys.argv[1]
+    python3 - "$PUBLIC_DB" "$PROJECT_DIR/criticality.json" <<'PYEOF' || die "Critical-table floor check failed — refusing to deploy"
+import json, sqlite3, sys
+db, criticality_json = sys.argv[1], sys.argv[2]
 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-floors = {
-    "returns":            5_000_000,
-    "grants":            13_000_000,
-    "schedule_i_grants":  1_000_000,
-    "schedule_i_990":     6_000_000,
-    "officers":          40_000_000,
-    "bmf":                1_800_000,
-    # Expanded 2026-05-10 audit. Conservative floors set ~80% of current
-    # values; legitimate growth never trips them, a wipe definitely does.
-    "capital_gains":     20_000_000,
-    "related_orgs":       7_500_000,
-    "investments":        5_000_000,
-}
+crit = json.load(open(criticality_json))["tables"]
+# Tables with floor=null are intentionally tracked in delta/smoke only — skip here.
+floors = {t: info["floor"] for t, info in crit.items() if info.get("floor") is not None}
 failures = []
 for table, floor in floors.items():
     n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -621,18 +611,16 @@ PYEOF
     #   REBUILD tables (schedule_i_grants) get 5% drop tolerance for
     #     legitimate variation across runs (e.g., a re-filed return removing rows).
     log "Verifying per-table delta vs $BACKUP_DB..."
-    python3 - "$PUBLIC_DB" "$BACKUP_DB" <<'PYEOF' || die "Delta guard failed — refusing to deploy"
-import sqlite3, sys, os
-public_db, prev_db = sys.argv[1], sys.argv[2]
+    python3 - "$PUBLIC_DB" "$BACKUP_DB" "$PROJECT_DIR/criticality.json" <<'PYEOF' || die "Delta guard failed — refusing to deploy"
+import json, sqlite3, sys, os
+public_db, prev_db, criticality_json = sys.argv[1], sys.argv[2], sys.argv[3]
 if not os.path.exists(prev_db):
     print(f"  SKIP delta guard: {prev_db} not found (first build?)")
     sys.exit(0)
 
-INCREMENTAL = {"returns", "grants", "schedule_i_990", "officers", "bmf",
-               "capital_gains", "related_orgs", "investments",
-               "contractors", "contributors", "top_employees",
-               "program_activities", "program_investments"}
-REBUILD = {"schedule_i_grants"}
+crit = json.load(open(criticality_json))["tables"]
+INCREMENTAL = {t for t, info in crit.items() if info["growth"] == "incremental"}
+REBUILD     = {t for t, info in crit.items() if info["growth"] == "rebuild"}
 
 cur = sqlite3.connect(f"file:{public_db}?mode=ro", uri=True)
 prev = sqlite3.connect(f"file:{prev_db}?mode=ro", uri=True)
@@ -889,7 +877,11 @@ METADATA_EOF
     sleep 5  # let Datasette warmup get going; COUNT(*) is fast even cold
     log "Post-deploy smoke test (prod vs local row counts)..."
     SMOKE_FAILED=0
-    for table in returns grants schedule_i_grants schedule_i_990 officers; do
+    # Smoke-test table list comes from criticality.json (single source of truth
+    # shared with the floor + delta guards). Adding a table to the smoke set
+    # means flipping `smoke: true` in criticality.json — no code edit here.
+    SMOKE_TABLES=$(python3 -c "import json; print(' '.join(t for t,info in json.load(open('$PROJECT_DIR/criticality.json'))['tables'].items() if info.get('smoke')))")
+    for table in $SMOKE_TABLES; do
         # AS+n alias gives us a predictable JSON key regardless of Datasette
         # version's default column-name behavior. _shape=array returns a list
         # of single-key dicts: [{"n": 12345}].
@@ -940,19 +932,6 @@ if [[ -f "$PUBLIC_DB" ]]; then
     log "  Public DB size:    $(( PUBLIC_SIZE / 1048576 ))MB"
 fi
 log "========================================="
-
-# ── Step 7: Auto-commit server config to git ─────────────────────────────
-log "--- Step 7: Git auto-commit ---"
-if ! dry "Would auto-commit server config changes"; then
-    # Data is already deployed at this point — a git push failure here is a
-    # warning, not a fatal error. Without the `|| log` wrapper a transient
-    # network blip would abort the script after all real work is done.
-    if ssh $SSH_OPTS "$REMOTE_HOST" 'cd /opt/datasette && git add -A && git diff --cached --quiet || git commit -m "Auto: $(date +%Y-%m-%d) data update" && git push origin main' 2>>"$LOG_FILE"; then
-        log "Git auto-commit complete"
-    else
-        log "WARNING: git auto-commit failed (data already deployed; investigate push state)"
-    fi
-fi
 
 # Surface any post-deploy smoke-test failure as a non-zero exit so the cron's
 # hc.io ping alerts. By this point the deploy is live, the state file is
