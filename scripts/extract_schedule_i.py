@@ -9,13 +9,12 @@ This is how 990 filers (public charities) report their grantmaking.
 """
 
 import xml.etree.ElementTree as ET
-from pathlib import Path
 import sqlite3
 import sys
 import os
 import time
 
-DB_PATH = str(Path(__file__).resolve().parent.parent / '990data.db')
+DB_PATH = '/mnt/data/datadawn/990project/990data.db'
 
 # DAFs and major 990-filing grantmakers to extract
 # Format: (ein, short_name)
@@ -200,14 +199,16 @@ def main():
     
     total_grants = 0
     total_amount = 0
+    skipped_files = 0
     batch = []
     batch_size = 10000
-    
+
     for i, (ein, org_name, tax_year, source_file) in enumerate(filings):
         short_name = ein_to_name.get(ein, org_name)
-        
+
         if not os.path.exists(source_file):
-            print(f"  SKIP {short_name} {tax_year}: file not found")
+            print(f"  SKIP {short_name} {tax_year}: file not found ({source_file})")
+            skipped_files += 1
             continue
         
         t0 = time.time()
@@ -241,6 +242,21 @@ def main():
     
     print(f"\nDone! {total_grants:,} grants, ${total_amount:,.0f} total")
     print(f"Table: schedule_i_grants")
+    print(f"Skipped (file not found): {skipped_files:,} / {len(filings):,}")
+
+    # Guard: if more than 1% of source files were missing, the source_file paths
+    # are likely stale (e.g., the data dir was moved without updating returns.source_file).
+    # Exit non-zero so update.sh aborts before deploying a near-empty schedule_i_grants.
+    # Added 2026-05-10 after the 2026-05-01 build silently produced 14,890 rows
+    # (vs ~1.27M expected) because 5.21M source_file paths still pointed to the
+    # pre-`datadawn/` data dir layout. See bestpractices/incident_log.md.
+    if filings and skipped_files / len(filings) > 0.01:
+        msg = (f"FATAL: {skipped_files:,}/{len(filings):,} ({skipped_files/len(filings):.1%}) "
+               f"source files missing — refusing to commit a near-empty schedule_i_grants. "
+               f"Check returns.source_file paths.")
+        print(msg, file=sys.stderr)
+        db.close()
+        sys.exit(2)
     
     # Quick summary
     rows = db.execute("""
