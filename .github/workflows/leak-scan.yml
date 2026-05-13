@@ -1,0 +1,51 @@
+name: Leak scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan PR-added lines for operator/identity leak markers
+        run: |
+          set -uo pipefail
+          # Case-insensitive pattern set: catches operator name, prod-IP partial,
+          # cloud-provider names, personal-email patterns, unix username.
+          # Only scans lines ADDED in this PR (lines starting with '+' but not
+          # '+++' file headers). Pre-existing matches in untouched lines are
+          # ignored — that's the design.
+          PATTERN='tony|5\.78|hetzner|digitalocean|digital.ocean|tony01|gmail|someones'
+
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+
+          # 'someones-backup' is a known-accepted pre-existing B2 bucket name
+          # (decision recorded 2026-05-12). Strip those tokens before scanning
+          # so PRs that touch nearby lines don't false-positive. Any NEW use
+          # of 'someones' in a different context will still trigger.
+          added=$(git diff "$base..$head" --no-color | grep -E '^\+[^+]' || true)
+          cleaned=$(echo "$added" | sed 's/someones-backup//g')
+          matches=$(echo "$cleaned" | grep -niE "$PATTERN" || true)
+
+          if [ -n "$matches" ]; then
+            echo "::error::Leak marker found in PR-added lines:"
+            echo "$matches"
+            echo ""
+            echo "Pattern: $PATTERN"
+            echo "Filter:  someones-backup stripped (pre-existing exposure)"
+            echo ""
+            echo "Fix: remove the offending content, or — if this is a"
+            echo "false positive — note it in the PR description and a"
+            echo "maintainer can override."
+            exit 1
+          fi
+          echo "OK: no leak markers in added lines."
