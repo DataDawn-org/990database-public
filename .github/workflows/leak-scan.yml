@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Opt into Node 24 now — Node 20 is deprecated on GitHub Actions runners
+  # (default switches 2026-06-02, removed 2026-09-16). Silences the warning
+  # until actions/checkout publishes a Node-24-native release.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -28,11 +34,15 @@ jobs:
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
 
+          # Exclude the workflow file itself from the scan — it contains the
+          # pattern literals by design and would always self-false-positive.
+          # Any change to this workflow file is intentional and reviewed in
+          # the PR body.
           # 'someones-backup' is a known-accepted pre-existing B2 bucket name
           # (decision recorded 2026-05-12). Strip those tokens before scanning
-          # so PRs that touch nearby lines don't false-positive. Any NEW use
-          # of 'someones' in a different context will still trigger.
-          added=$(git diff "$base..$head" --no-color | grep -E '^\+[^+]' || true)
+          # so PRs touching nearby lines don't false-positive; any NEW use of
+          # 'someones' in a different context will still trigger.
+          added=$(git diff "$base..$head" --no-color -- . ':!.github/workflows/leak-scan.yml' | grep -E '^\+[^+]' || true)
           cleaned=$(echo "$added" | sed 's/someones-backup//g')
           matches=$(echo "$cleaned" | grep -niE "$PATTERN" || true)
 
@@ -41,7 +51,7 @@ jobs:
             echo "$matches"
             echo ""
             echo "Pattern: $PATTERN"
-            echo "Filter:  someones-backup stripped (pre-existing exposure)"
+            echo "Filters: someones-backup stripped; .github/workflows/leak-scan.yml excluded"
             echo ""
             echo "Fix: remove the offending content, or — if this is a"
             echo "false positive — note it in the PR description and a"
