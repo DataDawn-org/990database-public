@@ -97,9 +97,13 @@ elapsed() {
 # Called after a successful 990 upload. Takes the predeploy snapshot that
 # was written to the VPS (cp ${REMOTE_DB_PATH} → ${REMOTE_BACKUP_DIR}/) and:
 #   1. Quick-checks it on VPS (refuse to propagate corruption)
-#   2. Rsyncs it down to LOCAL_BACKUP_DIR
-#   3. Rotates local to last 3 (via rotate_local_backups.py)
-#   4. rclone copies to B2_REMOTE
+#   1b. Writes a sidecar manifest.json on the VPS next to the backup
+#       (DR drill F-001/F-003 follow-up — row counts of critical tables +
+#       schema fingerprint so we can tell what's in a backup without
+#       opening it; mirrors openregs/deploy/deploy.sh)
+#   2. Rsyncs both files down to LOCAL_BACKUP_DIR
+#   3. Rotates local to last 3 (via rotate_local_backups.py, .db + manifest)
+#   4. rclone copies both files to B2_REMOTE
 #   5. Rotates B2 to last 3 (inline)
 #
 # F-005 from 2026-04-26 DR drill: the openregs path got this propagation
@@ -118,6 +122,7 @@ propagate_990_backup_to_local_and_b2() {
         return 0
     fi
     local remote_backup="$REMOTE_BACKUP_DIR/$backup_file"
+    local crit_path="$PROJECT_DIR/criticality.json"
 
     log "=== Backup propagation (local + B2) ==="
 
@@ -133,7 +138,66 @@ sys.exit(0 if r == 'ok' else 2)
     fi
     log "  quick_check: ok"
 
-    # 2. Pull the VPS snapshot down to the local backups dir.
+    # 1b. Write manifest sidecar on the VPS. Non-fatal — backup is still
+    # usable without it; just means DR can't cheap-check this backup's
+    # contents until next deploy.
+    if [[ -f "$crit_path" ]]; then
+        local crit_tables_json
+        crit_tables_json=$(python3 -c "import json,sys; print(json.dumps(list(json.load(open('$crit_path'))['tables'].keys())))")
+        log "Writing manifest sidecar on VPS..."
+        if ssh $SSH_OPTS "$REMOTE_HOST" \
+                "REMOTE_BACKUP='$remote_backup' CRIT_TABLES='$crit_tables_json' SOURCE_SCRIPT=990project/update.sh python3 -" \
+                <<'PYEOF'
+import sqlite3, json, os, hashlib, time, sys
+backup = os.environ['REMOTE_BACKUP']
+tables = json.loads(os.environ['CRIT_TABLES'])
+conn = sqlite3.connect(f'file:{backup}?mode=ro', uri=True)
+schema_rows = conn.execute(
+    "SELECT type, name, sql FROM sqlite_schema "
+    "WHERE sql IS NOT NULL ORDER BY type, name"
+).fetchall()
+schema_text = "\n".join(f"{t}\t{n}\t{s}" for t, n, s in schema_rows)
+schema_fp = hashlib.sha256(schema_text.encode()).hexdigest()
+existing = {r[0] for r in conn.execute(
+    "SELECT name FROM sqlite_schema WHERE type='table'").fetchall()}
+row_counts = {}
+for t in tables:
+    if t in existing:
+        try:
+            row_counts[t] = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        except sqlite3.Error:
+            row_counts[t] = None
+manifest = {
+    "schema_version": 1,
+    "backup_file": os.path.basename(backup),
+    "manifest_timestamp_utc": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    "backup_mtime_utc": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(os.path.getmtime(backup))),
+    "db_size_bytes": os.path.getsize(backup),
+    "quick_check": "ok",
+    "schema_fingerprint_sha256": schema_fp,
+    "sqlite_version": sqlite3.sqlite_version,
+    "row_counts": row_counts,
+    "row_count_tables_present": sum(1 for v in row_counts.values() if v is not None),
+    "row_count_tables_missing": sum(1 for v in row_counts.values() if v is None),
+    "source": os.environ.get('SOURCE_SCRIPT', ''),
+}
+out = backup + '.manifest.json'
+tmp = out + '.tmp'
+with open(tmp, 'w') as f:
+    json.dump(manifest, f, indent=2, sort_keys=True)
+os.rename(tmp, out)
+print(f"manifest: {out} ({manifest['row_count_tables_present']} tables, fp={schema_fp[:12]})", file=sys.stderr)
+PYEOF
+        then
+            log "  manifest written"
+        else
+            log "  WARNING: manifest generation failed (non-fatal — backup itself is intact)"
+        fi
+    else
+        log "  (criticality.json missing locally — skipping manifest sidecar)"
+    fi
+
+    # 2. Pull the VPS snapshot + manifest down to the local backups dir.
     mkdir -p "$LOCAL_BACKUP_DIR"
     log "Pulling $remote_backup → $LOCAL_BACKUP_DIR/"
     if ! rsync -a --partial-dir=.rsync-partials -e "ssh $SSH_OPTS" --timeout=600 \
@@ -142,22 +206,42 @@ sys.exit(0 if r == 'ok' else 2)
         return 3
     fi
     log "  local copy: $LOCAL_BACKUP_DIR/$backup_file"
+    # Manifest pull is best-effort — pre-manifest backups won't have one.
+    rsync -a -e "ssh $SSH_OPTS" --timeout=60 \
+        "$REMOTE_HOST:${remote_backup}.manifest.json" \
+        "$LOCAL_BACKUP_DIR/${backup_file}.manifest.json" 2>/dev/null \
+        && log "  local manifest: $LOCAL_BACKUP_DIR/${backup_file}.manifest.json" \
+        || log "  (no manifest on VPS to pull — pre-manifest backup or generation failed)"
 
-    # 3. Rotate local to last 3.
+    # 3. Rotate local to last 3 (both .db and .db.manifest.json families).
     if ! python3 "$ROTATE_HELPER" --dir "$LOCAL_BACKUP_DIR" --keep 3 \
             --glob '990-predeploy-*.db'; then
         log "  WARNING: local rotation helper failed"
         return 4
     fi
+    # Manifest sidecars: keep last 3 too. Exit 2 ("nothing matched") is fine
+    # during the rollout period when no manifests exist yet.
+    local rc=0
+    python3 "$ROTATE_HELPER" --dir "$LOCAL_BACKUP_DIR" --keep 3 \
+        --glob '990-predeploy-*.db.manifest.json' || rc=$?
+    if [[ $rc -ne 0 && $rc -ne 2 ]]; then
+        log "  WARNING: manifest rotation helper failed (exit $rc)"
+    fi
 
-    # 4. Push to B2.
+    # 4. Push to B2 (db + manifest together).
     log "Pushing to $B2_REMOTE/"
     if ! rclone copy "$LOCAL_BACKUP_DIR/$backup_file" "$B2_REMOTE/"; then
         log "  WARNING: B2 push failed"
         return 5
     fi
+    if [[ -f "$LOCAL_BACKUP_DIR/${backup_file}.manifest.json" ]]; then
+        rclone copy "$LOCAL_BACKUP_DIR/${backup_file}.manifest.json" "$B2_REMOTE/" \
+            || log "  WARNING: B2 manifest push failed (non-fatal)"
+    fi
 
-    # 5. Rotate B2 to last 3 (inline).
+    # 5. Rotate B2 to last 3 (inline — sort lexically on filename works
+    # because our format encodes timestamp in the name). Sweeps both .db
+    # backups and any orphaned .manifest.json files.
     log "Rotating B2 backups (keep 3)..."
     local b2_excess
     b2_excess=$(rclone lsf "$B2_REMOTE/" --files-only 2>/dev/null \
@@ -168,9 +252,23 @@ sys.exit(0 if r == 'ok' else 2)
             [[ -z "$f" ]] && continue
             log "  rclone delete $B2_REMOTE/$f"
             rclone delete "$B2_REMOTE/$f" || log "    (delete failed for $f, continuing)"
+            # Sweep the paired manifest if present.
+            rclone delete "$B2_REMOTE/${f}.manifest.json" 2>/dev/null || true
         done <<< "$b2_excess"
     else
         log "  B2 already at or under 3 backups, nothing to rotate"
+    fi
+    # Also sweep any manifest orphans (e.g. from rollout transitions).
+    local b2_manifest_orphans
+    b2_manifest_orphans=$(rclone lsf "$B2_REMOTE/" --files-only 2>/dev/null \
+                | grep -E '^990-predeploy-.*\.db\.manifest\.json$' \
+                | sort | head -n -3 || true)
+    if [[ -n "$b2_manifest_orphans" ]]; then
+        while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            log "  rclone delete $B2_REMOTE/$f (manifest orphan)"
+            rclone delete "$B2_REMOTE/$f" || log "    (delete failed for $f, continuing)"
+        done <<< "$b2_manifest_orphans"
     fi
 
     log "Backup propagation complete"
