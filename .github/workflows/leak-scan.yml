@@ -13,13 +13,6 @@ env:
   # until actions/checkout publishes a Node-24-native release.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
-  # Identity-marker pattern. Defined here (workflow-level env) rather than as
-  # a bash assignment inside the `run:` block so Actions does not echo the
-  # value to the log on every run (Actions echoes each line of `run:` script
-  # source verbatim; env-block declarations are not echoed). The workflow file
-  # itself is excluded from its own scan via pathspec below.
-  LEAK_PATTERN: 'tony|5\.78|hetzner|digitalocean|digital.ocean|tony01|gmail|someones'
-
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -29,27 +22,37 @@ jobs:
           fetch-depth: 0
 
       - name: Scan PR-added lines for operator/identity leak markers
+        env:
+          # Pattern is stored as a repository secret so Actions auto-masks it
+          # in step logs (including env-var setup echoes). Editing the pattern
+          # is done via `gh secret set LEAK_PATTERN` rather than committing to
+          # this file. Old commits in git history still contain the inline
+          # pattern; that's accepted residual exposure (see incident_log.md).
+          LEAK_PATTERN: ${{ secrets.LEAK_PATTERN }}
         run: |
           set -uo pipefail
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
 
+          if [ -z "$LEAK_PATTERN" ]; then
+            echo "::error::LEAK_PATTERN secret is unset on this repo. Set it via 'gh secret set LEAK_PATTERN'."
+            exit 1
+          fi
+
           # Only scans lines ADDED in this PR (lines starting with '+' but not
           # '+++' file headers). Pre-existing matches in untouched lines are
           # ignored — that's the design.
-          # Workflow file excluded from self-scan (would always false-positive
-          # on its own pattern definition). 'someones-backup' is a known-
-          # accepted pre-existing B2 bucket name (decision recorded 2026-05-12)
-          # and is stripped before scanning.
-          added=$(git diff "$base..$head" --no-color -- . ':!.github/workflows/leak-scan.yml' | grep -E '^\+[^+]' || true)
+          # 'someones-backup' is a known-accepted pre-existing B2 bucket name
+          # (decision recorded 2026-05-12) and is stripped before scanning.
+          added=$(git diff "$base..$head" --no-color | grep -E '^\+[^+]' || true)
           cleaned=$(echo "$added" | sed 's/someones-backup//g')
 
           if echo "$cleaned" | grep -qiE "$LEAK_PATTERN"; then
-            # IMPORTANT: do not echo matched content. Public Actions logs are
-            # readable forever — printing the matched lines would re-leak the
-            # exact content we're catching. Authors should run the scan locally
-            # to see what triggered it.
-            echo "::error::Leak marker detected in PR-added lines. Logs intentionally do not display matched content (printing them would re-leak). Run the scan locally against your diff to identify and remove the offending lines; see .github/workflows/leak-scan.yml for the pattern."
+            # IMPORTANT: do not echo matched content. Actions logs are public
+            # and forever-retained — printing the matched lines would re-leak
+            # the exact content we're catching. Authors should run the scan
+            # locally to see what triggered it.
+            echo "::error::Leak marker detected in PR-added lines. Run the leak scan locally against your diff to identify and remove the offending lines."
             exit 1
           fi
           echo "OK: no leak markers in added lines."
