@@ -22,7 +22,7 @@
 
 {% set pf_timeline = sql("SELECT sub.tax_year, sub.total_revenue, sub.total_expenses, sub.contributions_received, sub.contributions_paid, sub.fmv_assets_eoy, sub.net_assets_eoy, sub.qualifying_distributions, sub.total_assets_eoy, sub.object_id FROM (SELECT r.tax_year, r.total_revenue, r.total_expenses, r.contributions_received, r.contributions_paid, r.fmv_assets_eoy, r.net_assets_eoy, r.qualifying_distributions, r.total_assets_eoy, r.object_id, ROW_NUMBER() OVER (PARTITION BY r.tax_year ORDER BY r.object_id DESC) AS rn FROM returns r WHERE r.ein = :ein AND r.return_type = '990PF') sub WHERE sub.rn = 1 ORDER BY sub.tax_year DESC", {"ein": ein}, database="990data_public") %}
 
-{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.compensation, o.benefits FROM officers o WHERE o.object_id = (SELECT r.object_id FROM returns r WHERE r.ein = :ein ORDER BY r.tax_year DESC, r.object_id DESC LIMIT 1) ORDER BY o.compensation DESC LIMIT 25", {"ein": ein}, database="990data_public") %}
+{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.reportable_comp_filing_org, (COALESCE(o.reportable_comp_related_org, 0) + COALESCE(o.other_compensation, 0) + COALESCE(o.benefits, 0) + COALESCE(o.expense_account, 0)) AS other_comp FROM officers o WHERE o.object_id = (SELECT r.object_id FROM returns r WHERE r.ein = :ein ORDER BY r.tax_year DESC, r.object_id DESC LIMIT 1) ORDER BY o.reportable_comp_filing_org DESC LIMIT 25", {"ein": ein}, database="990data_public") %}
 
 {% set grants_made = sql("SELECT g.id, g.recipient_name, g.recipient_city, g.recipient_state, g.amount, g.purpose, g.grant_date, g.grant_type, r2.tax_year FROM grants g LEFT JOIN returns r2 ON r2.object_id = g.object_id WHERE g.ein = :ein AND g.grant_type = 'paid' ORDER BY g.amount DESC LIMIT 100", {"ein": ein}, database="990data_public") %}
 
@@ -190,7 +190,8 @@
         <th>Name</th>
         <th>Title</th>
         <th class="right">Hours/Wk</th>
-        <th class="money">Compensation</th>
+        <th class="money">Comp from Filing Org</th>
+        <th class="money">Other Comp</th>
       </tr>
     </thead>
     <tbody>
@@ -199,7 +200,8 @@
         <td>{{ o["person_name"] or "&mdash;"|safe }}</td>
         <td>{{ o["title"] or "&mdash;"|safe }}</td>
         <td class="right">{{ o["avg_hours_per_week"] if o["avg_hours_per_week"] is not none else "&mdash;"|safe }}</td>
-        <td class="money">{{ "${:,.0f}".format(o["compensation"]) if o["compensation"] is not none and o["compensation"] > 0 else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(o["reportable_comp_filing_org"]) if o["reportable_comp_filing_org"] is not none and o["reportable_comp_filing_org"] > 0 else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(o["other_comp"]) if o["other_comp"] is not none and o["other_comp"] > 0 else "&mdash;"|safe }}</td>
       </tr>
       {% endfor %}
     </tbody>

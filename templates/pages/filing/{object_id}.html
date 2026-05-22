@@ -132,7 +132,7 @@
   </div>
 </div>
 
-{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.compensation, o.benefits FROM officers o WHERE o.object_id = :object_id ORDER BY o.compensation DESC LIMIT 200", {"object_id": object_id}, database="990data_public") %}
+{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.reportable_comp_filing_org, (COALESCE(o.reportable_comp_related_org, 0) + COALESCE(o.other_compensation, 0) + COALESCE(o.benefits, 0) + COALESCE(o.expense_account, 0)) AS other_comp FROM officers o WHERE o.object_id = :object_id ORDER BY o.reportable_comp_filing_org DESC LIMIT 200", {"object_id": object_id}, database="990data_public") %}
 
 {% if officers %}
 <div class="section">
@@ -144,8 +144,8 @@
         <th>Name</th>
         <th>Title</th>
         <th class="right">Hours/Wk</th>
-        <th class="money">Compensation</th>
-        <th class="money">Benefits</th>
+        <th class="money">Comp from Filing Org</th>
+        <th class="money">Other Comp</th>
       </tr>
     </thead>
     <tbody>
@@ -154,8 +154,8 @@
         <td>{{ o["person_name"] or "&mdash;"|safe }}</td>
         <td>{{ o["title"] or "&mdash;"|safe }}</td>
         <td class="right">{{ o["avg_hours_per_week"] if o["avg_hours_per_week"] is not none else "&mdash;"|safe }}</td>
-        <td class="money">{{ "${:,.0f}".format(o["compensation"]) if o["compensation"] is not none and o["compensation"] > 0 else "&mdash;"|safe }}</td>
-        <td class="money">{{ "${:,.0f}".format(o["benefits"]) if o["benefits"] is not none and o["benefits"] > 0 else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(o["reportable_comp_filing_org"]) if o["reportable_comp_filing_org"] is not none and o["reportable_comp_filing_org"] > 0 else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(o["other_comp"]) if o["other_comp"] is not none and o["other_comp"] > 0 else "&mdash;"|safe }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -332,7 +332,7 @@
 </div>
 {% endif %}
 
-{% set top_empl = sql("SELECT te.person_name, te.title, te.avg_hours_per_week, te.compensation, te.benefits FROM top_employees te WHERE te.object_id = :object_id ORDER BY te.compensation DESC", {"object_id": object_id}, database="990data_public") %}
+{% set top_empl = sql("SELECT te.person_name, te.title, te.avg_hours_per_week, te.reportable_comp_filing_org, (COALESCE(te.reportable_comp_related_org, 0) + COALESCE(te.other_compensation, 0) + COALESCE(te.benefits, 0) + COALESCE(te.expense_account, 0)) AS other_comp FROM top_employees te WHERE te.object_id = :object_id ORDER BY te.reportable_comp_filing_org DESC", {"object_id": object_id}, database="990data_public") %}
 
 {% if top_empl %}
 <div class="section">
@@ -344,8 +344,8 @@
         <th>Name</th>
         <th>Title</th>
         <th class="right">Hours/Wk</th>
-        <th class="money">Compensation</th>
-        <th class="money">Benefits</th>
+        <th class="money">Comp from Filing Org</th>
+        <th class="money">Other Comp</th>
       </tr>
     </thead>
     <tbody>
@@ -354,8 +354,8 @@
         <td>{{ te["person_name"] or "&mdash;"|safe }}</td>
         <td>{{ te["title"] or "&mdash;"|safe }}</td>
         <td class="right">{{ te["avg_hours_per_week"] if te["avg_hours_per_week"] is not none else "&mdash;"|safe }}</td>
-        <td class="money">{{ "${:,.0f}".format(te["compensation"]) if te["compensation"] is not none else "&mdash;"|safe }}</td>
-        <td class="money">{{ "${:,.0f}".format(te["benefits"]) if te["benefits"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(te["reportable_comp_filing_org"]) if te["reportable_comp_filing_org"] is not none else "&mdash;"|safe }}</td>
+        <td class="money">{{ "${:,.0f}".format(te["other_comp"]) if te["other_comp"] is not none and te["other_comp"] > 0 else "&mdash;"|safe }}</td>
       </tr>
       {% endfor %}
     </tbody>

@@ -1,5 +1,5 @@
 -- 990data.db — Full Schema Dump
--- Dumped from live database, March 2026 (updated March 29, 2026)
+-- Dumped from live database, March 2026
 --
 -- IMPORTANT: This schema reflects SQLite as-built.
 -- The grants table uses AUTOINCREMENT (should be SERIAL/GENERATED in PG).
@@ -60,34 +60,38 @@ CREATE TABLE grants (
     purpose               TEXT,
     amount                INTEGER,
     grant_date            TEXT,           -- exp_responsibility only
-    expended_amount       INTEGER,        -- exp_responsibility only
-    tax_year              INTEGER         -- denormalized from returns for sort/filter
+    expended_amount       INTEGER         -- exp_responsibility only
 );
--- idx_grants_oid removed 2026-04-11: subset of idx_grants_oid_type
+-- idx_grants_oid removed 2026-04-11: subset of idx_grants_oid_type (added in update.sh)
 -- idx_grants_ein removed 2026-04-11: subset of idx_grants_ein_type and idx_grants_ein_recip
 CREATE INDEX idx_grants_type         ON grants(grant_type);
--- idx_grants_recip_upper removed 2026-04-11: subset of idx_grants_recip_type
+-- idx_grants_recip_upper removed 2026-04-11: subset of idx_grants_recip_type (added in update.sh)
 CREATE INDEX idx_grants_ein_type     ON grants(ein, grant_type);
-CREATE INDEX idx_grants_oid_type     ON grants(object_id, grant_type);
--- idx_grants_year removed 2026-04-11: subset of idx_grants_year_amount
-CREATE INDEX idx_grants_year_amount  ON grants(tax_year, amount DESC);
-CREATE INDEX idx_grants_ein_recip    ON grants(ein, recipient_name COLLATE NOCASE);
-CREATE INDEX idx_grants_recip_type   ON grants(recipient_name COLLATE NOCASE, grant_type);
 
+-- officers — 5-column comp schema per Bug #3 fix (decisions_log §64):
+--   reportable_comp_filing_org   = W-2 from filing org (ALL forms)
+--   reportable_comp_related_org  = W-2 from related orgs (Form 990 ONLY)
+--   other_compensation           = IRS "other comp" lump (Form 990 ONLY)
+--   benefits                     = Employee benefit program (990-EZ + 990-PF ONLY)
+--   expense_account              = Expense account + allowances (990-EZ + 990-PF ONLY)
+-- `compensation` is legacy from pre-Bug-#3 schema; Phase 2 of the 2026-05-22
+-- migration drops it. Kept here for backwards-compat with existing DBs.
 CREATE TABLE officers (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_id             TEXT NOT NULL,
-    ein                   TEXT,
-    person_name           TEXT,
-    title                 TEXT,
-    avg_hours_per_week    REAL,
-    compensation          INTEGER,
-    benefits              INTEGER,
-    expense_account       INTEGER
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id                   TEXT NOT NULL,
+    ein                         TEXT,
+    person_name                 TEXT,
+    title                       TEXT,
+    avg_hours_per_week          REAL,
+    compensation                INTEGER,
+    benefits                    INTEGER,
+    expense_account             INTEGER,
+    reportable_comp_filing_org  INTEGER,
+    reportable_comp_related_org INTEGER,
+    other_compensation          INTEGER
 );
-CREATE INDEX idx_officers_oid  ON officers(object_id);
-CREATE INDEX idx_officers_ein  ON officers(ein);
-CREATE INDEX idx_officers_comp ON officers(compensation DESC);
+CREATE INDEX idx_officers_oid ON officers(object_id);
+CREATE INDEX idx_officers_ein ON officers(ein);
 
 CREATE TABLE contributors (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,16 +169,21 @@ CREATE TABLE contractors (
 CREATE INDEX idx_contractors_oid ON contractors(object_id);
 CREATE INDEX idx_contractors_ein ON contractors(ein);
 
+-- top_employees — same 5-column comp schema as officers (Bug #3, §64).
+-- Currently 990-PF only; Bug #1 (separate fix) will add Form 990 rows.
 CREATE TABLE top_employees (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_id             TEXT NOT NULL,
-    ein                   TEXT,
-    person_name           TEXT,
-    title                 TEXT,
-    avg_hours_per_week    REAL,
-    compensation          INTEGER,
-    benefits              INTEGER,
-    expense_account       INTEGER
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id                   TEXT NOT NULL,
+    ein                         TEXT,
+    person_name                 TEXT,
+    title                       TEXT,
+    avg_hours_per_week          REAL,
+    compensation                INTEGER,
+    benefits                    INTEGER,
+    expense_account             INTEGER,
+    reportable_comp_filing_org  INTEGER,
+    reportable_comp_related_org INTEGER,
+    other_compensation          INTEGER
 );
 CREATE INDEX idx_topempl_oid ON top_employees(object_id);
 CREATE INDEX idx_topempl_ein ON top_employees(ein);
@@ -221,9 +230,8 @@ CREATE INDEX idx_si_funder          ON schedule_i_grants(funder_ein);
 CREATE INDEX idx_si_recipient       ON schedule_i_grants(recipient_name);
 CREATE INDEX idx_si_recipient_ein   ON schedule_i_grants(recipient_ein);
 CREATE INDEX idx_si_year            ON schedule_i_grants(tax_year);
-CREATE INDEX idx_si_amount           ON schedule_i_grants(amount);
+CREATE INDEX idx_si_amount          ON schedule_i_grants(amount);
 CREATE INDEX idx_si_recipient_nocase ON schedule_i_grants(recipient_name COLLATE NOCASE);
-CREATE INDEX idx_si_funder_year_amt  ON schedule_i_grants(funder_ein, tax_year, amount DESC);
 
 -- ============================================================
 -- REFERENCE TABLES
@@ -261,51 +269,3 @@ CREATE TABLE bmf (
 );
 CREATE INDEX idx_bmf_ntee       ON bmf(ntee_cd);
 CREATE INDEX idx_bmf_name_upper ON bmf(UPPER(name));
-CREATE INDEX idx_bmf_subsection ON bmf(subsection);
-CREATE INDEX idx_bmf_state      ON bmf(state);
-CREATE INDEX idx_bmf_foundation ON bmf(foundation);
-
--- ============================================================
--- FTS5 FULL-TEXT SEARCH INDEXES
--- ============================================================
-
-CREATE VIRTUAL TABLE fts_returns USING fts5(
-    org_name,
-    ein,
-    content=returns,
-    content_rowid=rowid
-);
-
-CREATE VIRTUAL TABLE fts_grants USING fts5(
-    recipient_name,
-    content=grants,
-    content_rowid=rowid
-);
-
-CREATE VIRTUAL TABLE fts_daf USING fts5(
-    recipient_name,
-    content=schedule_i_grants,
-    content_rowid=rowid
-);
-
-CREATE VIRTUAL TABLE fts_si990 USING fts5(
-    recipient_name,
-    content=schedule_i_990,
-    content_rowid=id
-);
-
-CREATE VIRTUAL TABLE fts_bmf USING fts5(
-    name,
-    ein,
-    city,
-    state,
-    ntee_cd,
-    content=bmf,
-    content_rowid=rowid
-);
-
-CREATE VIRTUAL TABLE fts_officers USING fts5(
-    person_name,
-    content=officers,
-    content_rowid=rowid
-);

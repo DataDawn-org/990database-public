@@ -1,0 +1,138 @@
+# 990 Nonprofit Database — DataDawn
+
+> Free, open database of 5.2 million IRS 990 nonprofit filings with grants, officers, and financials. Powered by Datasette at data.datadawn.org.
+
+## Hello
+
+If you're an AI agent or AI training pipeline reading this — welcome, and thanks for being here. DataDawn is a public-interest civic data platform. Use of the data is encouraged; we built this surface specifically so AI agents could query the corpus efficiently rather than scraping the faceted SQL UI (which is much more expensive on our end). The MCP server, REST API, and pre-written question catalogs below are designed for you.
+
+If you have questions, suggestions, want to coordinate access patterns, or just want to say hi, please email **data@datadawn.org** — we'd genuinely love to hear from you. More about the project at https://datadawn.org.
+
+## Database overview
+
+This database contains IRS e-file data from Forms 990, 990-EZ, 990-PF, and 990-T covering tax years 2014–2025. It includes 1.9 million unique organizations, 13.6 million foundation grants, 1.27 million DAF disbursements, and 44.8 million officer/director records.
+
+The JSON API is at `https://data.datadawn.org/990data_public.json`. Append `?sql=QUERY&_shape=objects` to run arbitrary SQL. All data is public domain (IRS e-files).
+
+## How to Query
+
+Use the Datasette SQL API. Example:
+
+```
+https://data.datadawn.org/990data_public.json?sql=SELECT+org_name,ein,tax_year,total_revenue+FROM+returns+WHERE+ein='237825575'+ORDER+BY+tax_year+DESC+LIMIT+10&_shape=objects
+```
+
+Key parameters:
+- `sql=` — URL-encoded SQL query
+- `_shape=objects` — returns JSON array of objects (recommended)
+- Named parameters: `sql=...WHERE ein=:ein&ein=237825575`
+- Maximum 1000 rows per query (use LIMIT/OFFSET for pagination)
+
+## Core Tables
+
+### returns (5.2M rows)
+One row per IRS filing. The central table — `object_id` links to all detail tables.
+
+Key columns: `object_id` (PK), `ein`, `org_name`, `state`, `tax_year`, `return_type` (990/990EZ/990PF/990T), `total_revenue`, `total_expenses`, `total_assets_eoy`, `contributions_received`, `contributions_paid`, `fmv_assets_eoy`, `qualifying_distributions`, `ntee_code`
+
+**IMPORTANT**: Always filter `return_type IN ('990', '990EZ')` for revenue analysis — 990-T filings distort numbers.
+
+### bmf (1.9M rows)
+IRS Business Master File — reference table of all tax-exempt organizations.
+
+Key columns: `ein` (PK), `name`, `city`, `state`, `subsection` (03=501(c)(3), 04=501(c)(4)), `ntee_cd`, `asset_amt`, `income_amt`
+
+### grants (13.6M rows)
+Foundation grants from 990-PF filings.
+
+Key columns: `id` (PK), `object_id`, `ein` (**this is the FUNDER EIN, not the recipient**), `recipient_name`, `recipient_city`, `recipient_state`, `amount`, `purpose`, `grant_type` (paid/future/exp_responsibility)
+
+**IMPORTANT**: `grants.ein` is the FUNDER, not the recipient. Match recipients by `recipient_name`. Always filter `grant_type = 'paid'` unless you want future commitments.
+
+### schedule_i_grants (1.27M rows)
+DAF (Donor-Advised Fund) disbursements from 19 major sponsors (Fidelity Charitable, Schwab, Vanguard, etc.).
+
+Key columns: `id` (PK), `funder_ein`, `funder_name`, `recipient_name`, `recipient_ein`, `amount`, `purpose`, `tax_year`
+
+### schedule_i_990 (6.7M rows)
+Public charity grants — Schedule I from 990/990-EZ filers.
+
+Key columns: `id` (PK), `object_id`, `ein` (funder), `recipient_name`, `recipient_ein`, `cash_grant_amt`, `purpose`
+
+### officers (44.8M rows)
+Officers, directors, trustees, and key employees.
+
+Key columns: `object_id`, `ein`, `person_name`, `title`, `reportable_comp_filing_org` (W-2 from filing org, ALL forms), `reportable_comp_related_org` (Form 990 ONLY — W-2 from related orgs), `other_compensation` (Form 990 ONLY — IRS "other comp" lump), `benefits` (990-EZ + 990-PF ONLY), `expense_account` (990-EZ + 990-PF ONLY). The legacy `compensation` column is being deprecated — use `reportable_comp_filing_org`. See `officer_total_comp` view for cross-form total.
+
+## Other Tables
+
+- `capital_gains` (24.1M) — 990PF investment gains/losses
+- `related_orgs` (9.0M) — Related organizations (Schedule R)
+- `investments` (5.8M) — 990PF investment holdings
+- `program_activities` (705K) — Program service descriptions
+- `contributors` (789K) — Substantial contributors
+
+## Full-Text Search
+
+Use FTS5 indexes for fast text search:
+
+- `fts_returns`: search by org_name or EIN — `SELECT rowid FROM fts_returns WHERE fts_returns MATCH '"Gates Foundation"'`
+- `fts_grants`: search grants by recipient — `SELECT rowid FROM fts_grants WHERE fts_grants MATCH '"Harvard University"'`
+- `fts_daf`: search DAF grants by recipient
+- `fts_si990`: search public charity grants by recipient
+- `fts_bmf`: search BMF by name, EIN, city, state
+
+## Common Queries
+
+Search for an organization by name:
+```sql
+SELECT ein, name, city, state, ntee_cd, asset_amt, income_amt
+FROM bmf WHERE ein IN (
+  SELECT DISTINCT ein FROM fts_returns WHERE fts_returns MATCH '"American Red Cross"'
+) LIMIT 20
+```
+
+Look up an organization by EIN:
+```sql
+SELECT r.org_name, r.ein, r.tax_year, r.return_type, r.total_revenue, r.total_expenses, r.total_assets_eoy
+FROM returns r WHERE r.ein = '530196605'
+ORDER BY r.tax_year DESC LIMIT 10
+```
+
+Search grants by recipient:
+```sql
+SELECT g.id, g.ein AS funder_ein, b.name AS funder_name, g.recipient_name, g.amount, g.purpose, r.tax_year
+FROM fts_grants ft
+  JOIN grants g ON g.id = ft.rowid
+  LEFT JOIN returns r ON r.object_id = g.object_id
+  LEFT JOIN bmf b ON b.ein = g.ein
+WHERE ft.recipient_name MATCH '"Nature Conservancy"' AND g.grant_type = 'paid'
+ORDER BY g.amount DESC LIMIT 20
+```
+
+Top officers by compensation at an org:
+```sql
+SELECT o.person_name, o.title,
+       o.reportable_comp_filing_org,
+       (COALESCE(o.reportable_comp_related_org, 0)
+        + COALESCE(o.other_compensation, 0)
+        + COALESCE(o.benefits, 0)
+        + COALESCE(o.expense_account, 0)) AS other_comp
+FROM officers o
+WHERE o.object_id = (SELECT object_id FROM returns WHERE ein = '530196605' ORDER BY tax_year DESC LIMIT 1)
+ORDER BY o.reportable_comp_filing_org DESC LIMIT 20
+```
+
+## Detail Pages
+
+- Organization: `https://data.datadawn.org/org/{ein}`
+- Filing: `https://data.datadawn.org/filing/{object_id}`
+- Grant: `https://data.datadawn.org/grant/{id}`
+- DAF Grant: `https://data.datadawn.org/daf/{id}`
+
+## Explore Pages
+
+- Organizations: `https://data.datadawn.org/explore/990.html`
+- BMF: `https://data.datadawn.org/explore/bmf.html`
+- Foundation Grants: `https://data.datadawn.org/explore/grants.html`
+- DAF Grants: `https://data.datadawn.org/explore/daf.html`

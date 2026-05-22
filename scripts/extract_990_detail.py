@@ -14,7 +14,6 @@ Usage:
 """
 
 import logging
-from pathlib import Path
 import multiprocessing as mp
 import os
 import sqlite3
@@ -22,8 +21,12 @@ import sys
 import time
 from lxml import etree as ET
 
+# XXE-hardened parser for IRS XML — disable external entities + network DTD lookup
+# (per-worker module-level constant; lxml XMLParser is process-safe after fork).
+_SAFE_PARSER = ET.XMLParser(resolve_entities=False, no_network=True)
+
 # ── Configuration ──────────────────────────────────────────────────────────
-BASE_DIR = str(Path(__file__).resolve().parent.parent)
+BASE_DIR = "/mnt/data/datadawn/990project"
 DB_PATH = os.path.join(BASE_DIR, "990data.db")
 LOG_PATH = os.path.join(BASE_DIR, "extract.log")
 
@@ -152,8 +155,21 @@ def discover_files(db_path):
 
     # A file needs processing if ANY of the three tables still needs it
     already_all = already_officers & already_sched_i & already_related
-    files = [(oid, sf, rt) for oid, sf, rt in rows
-             if os.path.exists(sf) and oid not in already_all]
+
+    # Track missing-file rate as a tripwire (DAF-incident class: 2026-05-01 saw
+    # 5.21M stale `source_file` paths silently filtered, producing near-empty
+    # extracts). Same 1% guard pattern as extract_schedule_i.py — generalized
+    # 2026-05-10 codebase-health audit.
+    candidates = [(oid, sf, rt) for oid, sf, rt in rows if oid not in already_all]
+    files = [(oid, sf, rt) for oid, sf, rt in candidates if os.path.exists(sf)]
+    missing_files = len(candidates) - len(files)
+    if candidates and missing_files / len(candidates) > 0.01:
+        msg = (f"FATAL: {missing_files:,}/{len(candidates):,} ({missing_files/len(candidates):.1%}) "
+               f"source_file paths missing — refusing to extract a near-empty "
+               f"officers/schedule_i_990/related_orgs. Check returns.source_file paths.")
+        logging.error(msg)
+        sys.exit(2)
+
     logging.info(f"  Already in officers: {len(already_officers):,}")
     logging.info(f"  Already in schedule_i_990: {len(already_sched_i):,}")
     logging.info(f"  Already in related_orgs: {len(already_related):,}")
@@ -174,7 +190,7 @@ def parse_file(args):
     }
 
     try:
-        tree = ET.parse(filepath)
+        tree = ET.parse(filepath, parser=_SAFE_PARSER)
         root = tree.getroot()
         ein_val = find_text(root, "ReturnHeader.Filer.EIN")
         result["ein"] = ein_val
@@ -193,7 +209,16 @@ def parse_file(args):
 
 
 def _extract_990_officers(root, result):
-    """Extract officers/directors from 990 Part VII Section A."""
+    """Extract officers/directors from 990 Part VII Section A.
+
+    Form 990 column letters from the IRS form:
+      D = ReportableCompFromOrgAmt    → reportable_comp_filing_org
+      E = ReportableCompFromRltdOrgAmt → reportable_comp_related_org (Form 990 ONLY)
+      F = OtherCompensationAmt         → other_compensation (Form 990 ONLY)
+
+    benefits + expense_account columns are NULL for Form 990 rows
+    (those columns are for 990-EZ + 990-PF only; see decisions_log §64).
+    """
     irs = root.find(f".//{_tag('IRS990')}")
     if irs is None:
         return
@@ -213,14 +238,25 @@ def _extract_990_officers(root, result):
         other_comp = int_or_none(find_text(grp, "OtherCompensationAmt"))
         result["officers"].append((
             oid, ein, name, title, hours,
-            comp,       # compensation (from org)
-            comp_rltd,  # benefits → repurpose as comp from related org
-            other_comp, # expense_account → repurpose as other comp
+            comp,        # reportable_comp_filing_org
+            comp_rltd,   # reportable_comp_related_org (Form 990 only)
+            other_comp,  # other_compensation (Form 990 only)
+            None,        # benefits (990-EZ/990-PF only — NULL for Form 990)
+            None,        # expense_account (990-EZ/990-PF only — NULL for Form 990)
         ))
 
 
 def _extract_990ez_officers(root, result):
-    """Extract officers/directors from 990EZ."""
+    """Extract officers/directors from 990EZ.
+
+    990-EZ column letters from the IRS form:
+      c = CompensationAmt              → reportable_comp_filing_org
+      d = EmployeeBenefitProgramAmt    → benefits
+      e = ExpenseAccountOtherAllwncAmt → expense_account
+
+    reportable_comp_related_org + other_compensation are NULL for 990-EZ rows
+    (those columns are Form 990 ONLY; see decisions_log §64).
+    """
     irs = root.find(f".//{_tag('IRS990EZ')}")
     if irs is None:
         return
@@ -239,7 +275,11 @@ def _extract_990ez_officers(root, result):
         expense = int_or_none(find_text(grp, "ExpenseAccountOtherAllwncAmt"))
         result["officers"].append((
             oid, ein, name, title, hours,
-            comp, benefits, expense,
+            comp,      # reportable_comp_filing_org
+            None,      # reportable_comp_related_org (Form 990 only — NULL for 990-EZ)
+            None,      # other_compensation (Form 990 only — NULL for 990-EZ)
+            benefits,  # benefits
+            expense,   # expense_account
         ))
 
 
@@ -356,6 +396,44 @@ def _extract_related_org_grp(grp, oid, ein, section, result):
     ))
 
 
+# ── Pre-flight namespace check ────────────────────────────────────────────
+def _check_namespace_or_bail(sample_filepaths):
+    """Ensure IRS XML root namespace still matches the NS constant our
+    extractors hardcode. If IRS bumps the schema namespace, every
+    `find(_tag(...))` call returns None and we silently insert all-NULL
+    rows — same failure shape as the 2026-05-10 DAF incident. Probing the
+    first few files catches this loud BEFORE workers run on the full
+    batch. Audit H3, 2026-05-15. Cost: ~3 file parses (~1 ms each).
+    """
+    if not sample_filepaths:
+        return
+    probes = sample_filepaths[:3]
+    mismatches = []
+    parse_failures = 0
+    for fp in probes:
+        try:
+            tree = ET.parse(fp, parser=_SAFE_PARSER)
+            root_tag = tree.getroot().tag
+            ns = root_tag.split('}')[0].lstrip('{') if '}' in root_tag else ''
+            if ns != NS:
+                mismatches.append((fp, ns))
+        except Exception as e:
+            parse_failures += 1
+            logging.warning(f"namespace probe of {fp} failed: {e}")
+    if mismatches and len(mismatches) + parse_failures == len(probes):
+        sys.stderr.write(
+            f"NAMESPACE MISMATCH: all {len(probes)} probe file(s) have unexpected "
+            f"root namespace. Expected {NS!r}.\n"
+        )
+        for fp, ns in mismatches:
+            sys.stderr.write(f"  {fp}: {ns!r}\n")
+        sys.stderr.write(
+            "IRS likely bumped the XML schema. Extract scripts must be updated "
+            "before re-running — otherwise all extracted rows will be all-NULL.\n"
+        )
+        sys.exit(2)
+
+
 # ── Chunk Processor ──────────────────────────────────────────────────────
 def process_chunk(file_list):
     results = []
@@ -385,10 +463,19 @@ def writer_process(db_path, result_queue, total_files,
     t0 = time.time()
     last_log = 0
 
+    # 5-column comp schema per Bug #3 fix (decisions_log §64):
+    #   reportable_comp_filing_org   — W-2 from filing org (all forms)
+    #   reportable_comp_related_org  — W-2 from related orgs (Form 990 ONLY; NULL otherwise)
+    #   other_compensation           — IRS "other comp" lump (Form 990 ONLY; NULL otherwise)
+    #   benefits                     — Employee benefit program (990-EZ + 990-PF ONLY; NULL for Form 990)
+    #   expense_account              — Expense account + allowances (990-EZ + 990-PF ONLY; NULL for Form 990)
+    # `compensation` column is legacy and will be dropped in Phase 2 of the Bug #3 migration;
+    # parsers do NOT write to it. Phase 1 migration copied historical compensation → reportable_comp_filing_org.
     OFFICER_SQL = """INSERT INTO officers
         (object_id, ein, person_name, title, avg_hours_per_week,
-         compensation, benefits, expense_account)
-        VALUES (?,?,?,?,?,?,?,?)"""
+         reportable_comp_filing_org, reportable_comp_related_org, other_compensation,
+         benefits, expense_account)
+        VALUES (?,?,?,?,?,?,?,?,?,?)"""
     SCHED_I_SQL = """INSERT INTO schedule_i_990
         (object_id, ein, recipient_name, recipient_ein,
          recipient_city, recipient_state, recipient_zip,
@@ -510,6 +597,9 @@ def main():
     if limit:
         files = files[:limit]
         logging.info(f"Limited to {len(files):,} files")
+
+    # Pre-flight namespace check — abort loud if IRS schema bumped
+    _check_namespace_or_bail([f[1] for f in files])
 
     # Build chunks
     chunks = [files[i:i + WORKER_CHUNK_SIZE]
