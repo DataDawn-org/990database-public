@@ -117,3 +117,19 @@ description = "PEM private key block"
 regex = '''-----BEGIN\s+(RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED |)PRIVATE\s+KEY-----'''
 keywords = ["BEGIN", "PRIVATE KEY"]
 tags = ["credential", "private-key"]
+
+[[rules]]
+id = "dd-aws-named-r2-id"
+description = "Access key ID stored under AWS_ACCESS_KEY_ID (covers R2-via-S3-SDK boto3/rclone/aws-sdk convention, and real AWS if introduced); accepts 32-hex (R2) or AKIA20 (real AWS)"
+regex = '''(?i)aws_access_key_id\s*[:=]\s*["\']?([a-f0-9]{32}|AKIA[0-9A-Z]{16})["\']?'''
+secretGroup = 1
+keywords = ["aws_access_key_id"]
+tags = ["credential", "datadawn-shape", "r2", "aws-named"]
+
+[[rules]]
+id = "dd-aws-named-r2-secret"
+description = "Secret stored under AWS_SECRET_ACCESS_KEY (covers R2-via-S3-SDK usage and real AWS if introduced)"
+regex = '''(?i)aws_secret_access_key\s*[:=]\s*["\']?([A-Za-z0-9+/=]{20,80})["\']?'''
+secretGroup = 1
+keywords = ["aws_secret_access_key"]
+tags = ["credential", "datadawn-shape", "r2", "aws-named"]
