@@ -1,0 +1,51 @@
+name: Gitleaks credential-class scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  GITLEAKS_VERSION: '8.30.1'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan PR-added lines for credential-class shapes
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          # --redact masks matched values in output (Actions logs are public + retained)
+          # --log-opts scopes the scan to commits added by this PR
+          gitleaks detect \
+            --config .gitleaks.toml \
+            --log-opts="${base}..${head}" \
+            --redact \
+            --no-banner \
+            --report-format json \
+            --report-path /tmp/leaks.json
+
+      - name: Summarize on failure
+        if: failure()
+        run: |
+          echo "::error::Gitleaks flagged credential-shape content in PR-added lines."
+          echo "Run locally to see redacted details: gitleaks protect --staged --config .gitleaks.toml --redact"
+          echo "Identity-marker scan is handled separately by leak-scan.yml."
