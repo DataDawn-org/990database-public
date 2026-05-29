@@ -134,8 +134,8 @@ def generate(db_path=None):
     # Officers
     off = qrow(conn, """
         SELECT COUNT(*) AS total,
-               SUM(CASE WHEN compensation > 0 THEN 1 ELSE 0 END) AS with_comp,
-               ROUND(AVG(CASE WHEN compensation > 0 THEN compensation END)) AS avg_comp
+               SUM(CASE WHEN reportable_comp_filing_org > 0 THEN 1 ELSE 0 END) AS with_comp,
+               ROUND(AVG(CASE WHEN reportable_comp_filing_org > 0 THEN reportable_comp_filing_org END)) AS avg_comp
         FROM officers
     """)
     off_pct = round(100 * (off['with_comp'] or 0) / off['total'], 1) if off['total'] else 0
