@@ -106,16 +106,28 @@ CREATE INDEX IF NOT EXISTS idx_grants_recip_type ON grants(recipient_name COLLAT
 -- tax_year column is added to grants table (full rebuild TODO)
 
 -- Officers / Directors / Trustees
+-- Comp columns (5-column schema, Bug #3 fix, decisions_log §64):
+--   reportable_comp_filing_org   — W-2 from filing org (ALL forms)
+--   reportable_comp_related_org  — W-2 from related orgs (Form 990 ONLY)
+--   other_compensation           — IRS "other comp" lump (Form 990 ONLY)
+--   benefits                     — Employee benefit program (990-EZ + 990-PF ONLY)
+--   expense_account              — Expense account + allowances (990-EZ + 990-PF ONLY)
+-- `compensation` is legacy from pre-Bug-#3 schema; dropped in Phase 2 of the
+-- 2026-05-22 migration (kept here in CREATE for backwards-compat with existing
+-- databases — new builds get the column but parsers don't write to it).
 CREATE TABLE IF NOT EXISTS officers (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_id             TEXT NOT NULL,
-    ein                   TEXT,
-    person_name           TEXT,
-    title                 TEXT,
-    avg_hours_per_week    REAL,
-    compensation          INTEGER,
-    benefits              INTEGER,
-    expense_account       INTEGER
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id                   TEXT NOT NULL,
+    ein                         TEXT,
+    person_name                 TEXT,
+    title                       TEXT,
+    avg_hours_per_week          REAL,
+    compensation                INTEGER,
+    benefits                    INTEGER,
+    expense_account             INTEGER,
+    reportable_comp_filing_org  INTEGER,
+    reportable_comp_related_org INTEGER,
+    other_compensation          INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_officers_oid ON officers(object_id);
 CREATE INDEX IF NOT EXISTS idx_officers_ein ON officers(ein);
@@ -150,16 +162,21 @@ CREATE INDEX IF NOT EXISTS idx_contractors_oid ON contractors(object_id);
 CREATE INDEX IF NOT EXISTS idx_contractors_ein ON contractors(ein);
 
 -- Top Employees (non-officer, highest paid)
+-- Same 5-column comp schema as officers (Bug #3 fix, decisions_log §64).
+-- Currently 990-PF only; Bug #1 (separate fix) will add Form 990 rows.
 CREATE TABLE IF NOT EXISTS top_employees (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_id             TEXT NOT NULL,
-    ein                   TEXT,
-    person_name           TEXT,
-    title                 TEXT,
-    avg_hours_per_week    REAL,
-    compensation          INTEGER,
-    benefits              INTEGER,
-    expense_account       INTEGER
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id                   TEXT NOT NULL,
+    ein                         TEXT,
+    person_name                 TEXT,
+    title                       TEXT,
+    avg_hours_per_week          REAL,
+    compensation                INTEGER,
+    benefits                    INTEGER,
+    expense_account             INTEGER,
+    reportable_comp_filing_org  INTEGER,
+    reportable_comp_related_org INTEGER,
+    other_compensation          INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_topempl_oid ON top_employees(object_id);
 CREATE INDEX IF NOT EXISTS idx_topempl_ein ON top_employees(ein);
@@ -476,6 +493,12 @@ def parse_pf_file(oid, filepath):
             ))
 
         # ── Officers / Directors / Trustees ────────────────────────────
+        # 990-PF column letters from the IRS form (Part VIII Section 1):
+        #   c = CompensationAmt              → reportable_comp_filing_org
+        #   d = EmployeeBenefitProgramAmt    → benefits
+        #   e = ExpenseAccountOtherAllwncAmt → expense_account
+        # reportable_comp_related_org + other_compensation are Form 990 ONLY;
+        # NULL for 990-PF (see decisions_log §64).
         oinfo = irs.find(_tag("OfficerDirTrstKeyEmplInfoGrp"))
         if oinfo is not None:
             for o in oinfo.findall(_tag("OfficerDirTrstKeyEmplGrp")):
@@ -484,9 +507,11 @@ def parse_pf_file(oid, filepath):
                     find_text(o, "PersonNm"),
                     find_text(o, "TitleTxt"),
                     float_or_none(find_text(o, "AverageHrsPerWkDevotedToPosRt")),
-                    int_or_none(find_text(o, "CompensationAmt")),
-                    int_or_none(find_text(o, "EmployeeBenefitProgramAmt")),
-                    int_or_none(find_text(o, "ExpenseAccountOtherAllwncAmt")),
+                    int_or_none(find_text(o, "CompensationAmt")),                # reportable_comp_filing_org
+                    None,                                                          # reportable_comp_related_org (Form 990 only)
+                    None,                                                          # other_compensation (Form 990 only)
+                    int_or_none(find_text(o, "EmployeeBenefitProgramAmt")),       # benefits
+                    int_or_none(find_text(o, "ExpenseAccountOtherAllwncAmt")),    # expense_account
                 ))
 
             # Top 5 highest paid employees (non-officer)
@@ -496,9 +521,11 @@ def parse_pf_file(oid, filepath):
                     find_text(e, "PersonNm"),
                     find_text(e, "TitleTxt"),
                     float_or_none(find_text(e, "AverageHrsPerWkDevotedToPosRt")),
-                    int_or_none(find_text(e, "CompensationAmt")),
-                    int_or_none(find_text(e, "EmployeeBenefitsAmt")),
-                    int_or_none(find_text(e, "ExpenseAccountAmt")),
+                    int_or_none(find_text(e, "CompensationAmt")),                 # reportable_comp_filing_org
+                    None,                                                           # reportable_comp_related_org (Form 990 only)
+                    None,                                                           # other_compensation (Form 990 only)
+                    int_or_none(find_text(e, "EmployeeBenefitsAmt")),              # benefits
+                    int_or_none(find_text(e, "ExpenseAccountAmt")),                # expense_account
                 ))
 
             # Top contractors
@@ -702,8 +729,9 @@ INSERT_GRANTS = """INSERT INTO grants
 
 INSERT_OFFICERS = """INSERT INTO officers
     (object_id, ein, person_name, title, avg_hours_per_week,
-     compensation, benefits, expense_account)
-    VALUES (?,?,?,?,?,?,?,?)"""
+     reportable_comp_filing_org, reportable_comp_related_org, other_compensation,
+     benefits, expense_account)
+    VALUES (?,?,?,?,?,?,?,?,?,?)"""
 
 INSERT_CONTRIBUTORS = """INSERT INTO contributors
     (object_id, ein, contributor_name, city, state, zip, amount, contributor_type)
@@ -715,8 +743,9 @@ INSERT_CONTRACTORS = """INSERT INTO contractors
 
 INSERT_TOP_EMPLOYEES = """INSERT INTO top_employees
     (object_id, ein, person_name, title, avg_hours_per_week,
-     compensation, benefits, expense_account)
-    VALUES (?,?,?,?,?,?,?,?)"""
+     reportable_comp_filing_org, reportable_comp_related_org, other_compensation,
+     benefits, expense_account)
+    VALUES (?,?,?,?,?,?,?,?,?,?)"""
 
 INSERT_INVESTMENTS = """INSERT INTO investments
     (object_id, ein, investment_type, description, book_value, fmv, cost_basis)
