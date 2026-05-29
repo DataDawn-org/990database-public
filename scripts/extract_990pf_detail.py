@@ -10,7 +10,6 @@ Usage:
 """
 
 import logging
-from pathlib import Path
 import multiprocessing as mp
 import os
 import sqlite3
@@ -18,8 +17,12 @@ import sys
 import time
 from lxml import etree as ET
 
+# XXE-hardened parser for IRS XML — disable external entities + network DTD lookup
+# (per-worker module-level constant; lxml XMLParser is process-safe after fork).
+_SAFE_PARSER = ET.XMLParser(resolve_entities=False, no_network=True)
+
 # ── Configuration ──────────────────────────────────────────────────────────
-BASE_DIR = str(Path(__file__).resolve().parent.parent)
+BASE_DIR = "/mnt/data/datadawn/990project"
 DB_PATH = os.path.join(BASE_DIR, "990data.db")
 LOG_PATH = os.path.join(BASE_DIR, "extract.log")
 
@@ -244,20 +247,52 @@ def create_schema(con):
 # ── File Discovery ─────────────────────────────────────────────────────────
 def discover_pf_files(base_dir, db_path):
     """Find all 990-PF object_ids from DB, then locate their source files.
-    Skips object_ids already extracted into the grants table."""
+    Discovery-side: skips object_ids already extracted into the grants table.
+    Returns (files, skip_sets) — skip_sets is a per-table dict of object_ids
+    already written, consumed by writer_process for defense-in-depth.
+
+    The skip_sets are decisions_log §61 defense-in-depth. The 2026-05-22 PF
+    idempotency incident showed single-signal discovery is insufficient: PFs
+    with zero grants were re-discovered every cron run because they never
+    enter the grants table, and the writer had no guard to refuse the
+    re-insert. Result: 18-48% dup rate across 7 tables, ~14.8M excess rows.
+    Pattern mirrors extract_990_detail.py.
+    """
     con = sqlite3.connect(db_path)
     rows = con.execute(
         "SELECT object_id, source_file FROM returns WHERE return_type = '990PF'"
     ).fetchall()
-    # Get already-processed object_ids from grants table
+    # Discovery-side: skip files already in grants table (existing behavior).
     already_done = {row[0] for row in con.execute(
         "SELECT DISTINCT object_id FROM grants"
     )}
+    # Writer-side per-table skip sets (defense-in-depth, decisions_log §61).
+    skip_sets = {}
+    for table in ['grants', 'officers', 'contributors', 'contractors',
+                  'top_employees', 'investments', 'capital_gains',
+                  'program_activities', 'program_investments']:
+        try:
+            skip_sets[table] = {r[0] for r in con.execute(
+                f"SELECT DISTINCT object_id FROM {table}"
+            )}
+        except sqlite3.OperationalError:
+            skip_sets[table] = set()
     con.close()
-    # Filter to files that exist and haven't been processed yet
-    files = [(oid, sf) for oid, sf in rows
-             if os.path.exists(sf) and oid not in already_done]
-    return files
+    # Filter to files that exist and haven't been processed yet.
+    # Also enforce the 1% missing-file tripwire (DAF-incident class: 2026-05-01
+    # saw 5.21M stale `source_file` paths silently filtered into a near-empty
+    # extract). Generalized from extract_schedule_i.py via the 2026-05-10
+    # codebase-health audit.
+    candidates = [(oid, sf) for oid, sf in rows if oid not in already_done]
+    files = [(oid, sf) for oid, sf in candidates if os.path.exists(sf)]
+    missing_files = len(candidates) - len(files)
+    if candidates and missing_files / len(candidates) > 0.01:
+        msg = (f"FATAL: {missing_files:,}/{len(candidates):,} ({missing_files/len(candidates):.1%}) "
+               f"source_file paths missing — refusing to extract a near-empty 990-PF grants. "
+               f"Check returns.source_file paths.")
+        logging.error(msg)
+        sys.exit(2)
+    return files, skip_sets
 
 
 # ── Address Extraction ─────────────────────────────────────────────────────
@@ -343,7 +378,7 @@ def parse_pf_file(oid, filepath):
     }
 
     try:
-        tree = ET.parse(filepath)
+        tree = ET.parse(filepath, parser=_SAFE_PARSER)
         root = tree.getroot()
         ein_val = find_text(root, "ReturnHeader.Filer.EIN")
         result["ein"] = ein_val
@@ -614,6 +649,43 @@ def parse_pf_file(oid, filepath):
     return result
 
 
+def _check_namespace_or_bail(sample_filepaths):
+    """Ensure IRS XML root namespace still matches the NS constant our
+    extractors hardcode. If IRS bumps the schema namespace, every
+    `find(_tag(...))` call returns None and we silently insert all-NULL
+    rows — same failure shape as the 2026-05-10 DAF incident. Probing the
+    first few files catches this loud BEFORE workers run on the full
+    batch. Audit H3, 2026-05-15. Cost: ~3 file parses (~1 ms each).
+    """
+    if not sample_filepaths:
+        return
+    probes = sample_filepaths[:3]
+    mismatches = []
+    parse_failures = 0
+    for fp in probes:
+        try:
+            tree = ET.parse(fp, parser=_SAFE_PARSER)
+            root_tag = tree.getroot().tag
+            ns = root_tag.split('}')[0].lstrip('{') if '}' in root_tag else ''
+            if ns != NS:
+                mismatches.append((fp, ns))
+        except Exception as e:
+            parse_failures += 1
+            logging.warning(f"namespace probe of {fp} failed: {e}")
+    if mismatches and len(mismatches) + parse_failures == len(probes):
+        sys.stderr.write(
+            f"NAMESPACE MISMATCH: all {len(probes)} probe file(s) have unexpected "
+            f"root namespace. Expected {NS!r}.\n"
+        )
+        for fp, ns in mismatches:
+            sys.stderr.write(f"  {fp}: {ns!r}\n")
+        sys.stderr.write(
+            "IRS likely bumped the XML schema. Extract scripts must be updated "
+            "before re-running — otherwise all extracted rows will be all-NULL.\n"
+        )
+        sys.exit(2)
+
+
 def process_chunk(file_pairs):
     results = []
     for oid, filepath in file_pairs:
@@ -664,7 +736,12 @@ INSERT_PROG_INV = """INSERT INTO program_investments
     VALUES (?,?,?,?)"""
 
 
-def writer_process(db_path, result_queue, total_files):
+def writer_process(db_path, result_queue, total_files, skip_sets):
+    """Writer process. skip_sets is a per-table dict of object_ids already
+    written (loaded by discover_pf_files at script start). Per decisions_log
+    §61, the writer must refuse to re-insert rows for an oid already in the
+    target table — defense-in-depth against single-signal discovery misses.
+    """
     con = sqlite3.connect(db_path)
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA synchronous=NORMAL")
@@ -712,10 +789,16 @@ def writer_process(db_path, result_queue, total_files):
             if res["scalars"]:
                 bufs["scalar_updates"].append((oid, res["scalars"]))
 
+            # Writer-side per-table skip guards (decisions_log §61).
+            # Defense-in-depth: discovery may re-process a file (PFs without
+            # grants do this every cron run pre-fix), but the writer refuses
+            # to duplicate already-written rows. Pre-fix bug: 18-48% dup rate
+            # across 7 tables, ~14.8M excess rows. See incident_log 2026-05-22.
             for table in ["grants", "officers", "contributors", "contractors",
                           "top_employees", "investments", "capital_gains",
                           "program_activities", "program_investments"]:
-                bufs[table].extend(res[table])
+                if oid not in skip_sets[table]:
+                    bufs[table].extend(res[table])
 
         # Flush when buffer gets large
         total_buffered = sum(len(v) for v in bufs.values())
@@ -800,8 +883,10 @@ def main():
     n_workers = max(1, mp.cpu_count() - 2)
 
     logging.info("Discovering 990-PF files...")
-    all_files = discover_pf_files(BASE_DIR, DB_PATH)
+    all_files, skip_sets = discover_pf_files(BASE_DIR, DB_PATH)
     logging.info(f"Found {len(all_files):,} 990-PF filings")
+    logging.info(f"Writer-side skip sets loaded: " +
+                 ", ".join(f"{t}={len(skip_sets[t]):,}" for t in sorted(skip_sets)))
 
     if not all_files:
         logging.info("No 990-PF files found.")
@@ -812,12 +897,16 @@ def main():
         todo = todo[:limit]
         logging.info(f"Limited to {len(todo):,} files")
 
+    # Pre-flight namespace check — abort loud if IRS schema bumped
+    _check_namespace_or_bail([f[1] for f in todo])
+
     chunks = [todo[i:i + WORKER_CHUNK_SIZE]
               for i in range(0, len(todo), WORKER_CHUNK_SIZE)]
 
     result_queue = mp.Queue(maxsize=10_000)
 
-    writer = mp.Process(target=writer_process, args=(DB_PATH, result_queue, len(todo)))
+    writer = mp.Process(target=writer_process,
+                        args=(DB_PATH, result_queue, len(todo), skip_sets))
     writer.start()
 
     logging.info(f"Starting {n_workers} workers across {len(chunks):,} chunks...")
