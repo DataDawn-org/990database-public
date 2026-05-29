@@ -6,19 +6,75 @@
     "smoke": "true = include in post-deploy smoke test (prod row count vs local). Keep this set small (~5 tables, top by row volume) since each table = one extra HTTPS round-trip to prod."
   },
   "tables": {
-    "returns":             {"floor": 5000000,   "growth": "incremental", "smoke": true},
-    "grants":              {"floor": 13000000,  "growth": "incremental", "smoke": true},
-    "schedule_i_grants":   {"floor": 1000000,   "growth": "rebuild",     "smoke": true},
-    "schedule_i_990":      {"floor": 6000000,   "growth": "incremental", "smoke": true},
-    "officers":            {"floor": 40000000,  "growth": "incremental", "smoke": true},
-    "bmf":                 {"floor": 1800000,   "growth": "incremental", "smoke": false},
-    "capital_gains":       {"floor": 20000000,  "growth": "incremental", "smoke": false},
-    "related_orgs":        {"floor": 7500000,   "growth": "incremental", "smoke": false},
-    "investments":         {"floor": 5000000,   "growth": "incremental", "smoke": false},
-    "contractors":         {"floor": null,      "growth": "incremental", "smoke": false},
-    "contributors":        {"floor": null,      "growth": "incremental", "smoke": false},
-    "top_employees":       {"floor": null,      "growth": "incremental", "smoke": false},
-    "program_activities":  {"floor": null,      "growth": "incremental", "smoke": false},
-    "program_investments": {"floor": null,      "growth": "incremental", "smoke": false}
+    "returns": {
+      "floor": 5000000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "grants": {
+      "floor": 13000000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "schedule_i_grants": {
+      "floor": 1000000,
+      "growth": "rebuild",
+      "smoke": true
+    },
+    "schedule_i_990": {
+      "floor": 6000000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "officers": {
+      "floor": 40000000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "bmf": {
+      "floor": 1800000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "capital_gains": {
+      "floor": 20000000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "related_orgs": {
+      "floor": 7500000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "investments": {
+      "floor": 5000000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "contractors": {
+      "floor": null,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "contributors": {
+      "floor": null,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "top_employees": {
+      "floor": null,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "program_activities": {
+      "floor": null,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "program_investments": {
+      "floor": null,
+      "growth": "incremental",
+      "smoke": true
+    }
   }
 }

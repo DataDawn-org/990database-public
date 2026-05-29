@@ -1,0 +1,135 @@
+## Gitleaks credential-class ruleset.
+##
+## Scope: detects credential SHAPES (API keys, tokens, secrets). The identity-marker
+## class (operator/host/personal-email tokens) is handled separately by
+## .github/workflows/leak-scan.yml — this file is additive, not a replacement.
+##
+## Used by:
+##   .github/workflows/gitleaks.yml  — server-side PR-diff scan
+##   scripts/pre-commit-hook.sh      — client-side staged-content scan
+##
+## Local mirror at /mnt/data/datadawn/leak-detection/gitleaks.toml is a superset
+## (also contains identity rules for local pre-commit; not committed here).
+
+title = "Credential-class ruleset"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Carve-outs"
+paths = [
+  '''\.gitleaks\.toml$''',
+  '''\.git/''',
+]
+
+[[rules]]
+id = "dd-data-gov-api-key"
+description = "api.data.gov-issued 40-char API key (Regulations.gov, Congress.gov, GovInfo, LDA) — keyword-anchored shape match"
+regex = '''["']([A-Za-z0-9]{40})["']'''
+secretGroup = 1
+keywords = ["regs_api_key", "regulations_gov_api_key", "congress_gov_api_key", "lda_api_key", "govinfo_api_key", "REGS_API_KEY", "REGULATIONS_GOV_API_KEY", "CONGRESS_GOV_API_KEY", "LDA_API_KEY", "GOVINFO_API_KEY"]
+tags = ["credential", "data-gov"]
+
+[[rules]]
+id = "dd-generic-api-key-40char-in-config"
+description = "Quoted 40-char alnum value in config/scripts/.env file paths near generic api_key/token keywords"
+regex = '''["']([A-Za-z0-9]{40})["']'''
+secretGroup = 1
+keywords = ["api_key", "apikey", "api-key", "access_token", "auth_token", "secret_key"]
+path = '''(?i)(config|scripts|\.env|secrets)'''
+tags = ["credential", "generic", "shape-40-alnum"]
+
+[[rules]]
+id = "dd-cloudflare-r2-access-key"
+description = "Cloudflare R2 access key ID (32-char hex)"
+regex = '''(?i)(r2|cloudflare|cf)[_a-z]*(access[_-]?key([_-]?id)?|key[_-]?id|key)[^A-Za-z0-9]{1,8}["']?([a-f0-9]{32})["']?'''
+secretGroup = 4
+keywords = ["r2", "cloudflare", "access_key_id", "access_key"]
+tags = ["credential", "r2"]
+
+[[rules]]
+id = "dd-cloudflare-r2-secret"
+description = "Cloudflare R2 secret access key (40-80 char base64-ish)"
+regex = '''["']([A-Za-z0-9+/=]{40,80})["']'''
+secretGroup = 1
+keywords = ["r2_secret_access_key", "r2_secret", "R2_SECRET_ACCESS_KEY", "cloudflare_secret_access_key", "cf_secret_key", "CF_SECRET_KEY"]
+tags = ["credential", "r2"]
+
+[[rules]]
+id = "dd-openalex-api-key"
+description = "OpenAlex API key (~22-char alphanumeric)"
+regex = '''(?i)openalex[_a-z]*(api[_-]?key|key|token)[^A-Za-z0-9]{1,8}["']?([A-Za-z0-9]{20,24})["']?'''
+secretGroup = 2
+keywords = ["openalex"]
+tags = ["credential", "openalex"]
+
+[[rules]]
+id = "dd-hcio-ping-uuid"
+description = "healthchecks.io ping UUID (hc-ping.com/<UUID>) — bare URL form"
+regex = '''https?://hc-ping\.com/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'''
+secretGroup = 1
+keywords = ["hc-ping.com"]
+tags = ["credential", "hc-io"]
+
+[[rules]]
+id = "dd-hcio-api-key"
+description = "healthchecks.io API key (variable-name anchored)"
+regex = '''(?i)(hc[._-]?io|healthchecks)[_a-z]*(api[_-]?key|key|token)[^A-Za-z0-9]{1,8}["']?([0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}|[A-Za-z0-9_-]{20,48})["']?'''
+secretGroup = 3
+keywords = ["hc.io", "hc_io", "healthchecks"]
+tags = ["credential", "hc-io"]
+
+[[rules]]
+id = "dd-jwt"
+description = "JWT (3 base64url segments, header starts eyJ)"
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'''
+keywords = ["eyJ"]
+tags = ["credential", "jwt"]
+
+[[rules]]
+id = "dd-bearer-header"
+description = "HTTP Authorization Bearer header with token"
+regex = '''(?i)authorization\s*[:=]\s*["']?bearer\s+([A-Za-z0-9_\-\.=+/]{16,})["']?'''
+secretGroup = 1
+keywords = ["bearer"]
+tags = ["credential", "bearer"]
+
+[[rules]]
+id = "dd-postgres-url"
+description = "Postgres URL with embedded password"
+regex = '''(?i)(postgres|postgresql)://[^:@/\s]+:([^@\s]{4,})@'''
+secretGroup = 2
+keywords = ["postgres://", "postgresql://"]
+tags = ["credential", "conn-string"]
+
+[[rules]]
+id = "dd-aws-access-key-id"
+description = "AWS access key ID (AKIA*)"
+regex = '''(AKIA[0-9A-Z]{16})'''
+secretGroup = 1
+keywords = ["AKIA"]
+tags = ["credential", "aws"]
+
+[[rules]]
+id = "dd-private-key-pem"
+description = "PEM private key block"
+regex = '''-----BEGIN\s+(RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED |)PRIVATE\s+KEY-----'''
+keywords = ["BEGIN", "PRIVATE KEY"]
+tags = ["credential", "private-key"]
+
+[[rules]]
+id = "dd-aws-named-r2-id"
+description = "Access key ID stored under AWS_ACCESS_KEY_ID (covers R2-via-S3-SDK boto3/rclone/aws-sdk convention, and real AWS if introduced); accepts 32-hex (R2) or AKIA20 (real AWS)"
+regex = '''(?i)aws_access_key_id\s*[:=]\s*["\']?([a-f0-9]{32}|AKIA[0-9A-Z]{16})["\']?'''
+secretGroup = 1
+keywords = ["aws_access_key_id"]
+tags = ["credential", "datadawn-shape", "r2", "aws-named"]
+
+[[rules]]
+id = "dd-aws-named-r2-secret"
+description = "Secret stored under AWS_SECRET_ACCESS_KEY (covers R2-via-S3-SDK usage and real AWS if introduced)"
+regex = '''(?i)aws_secret_access_key\s*[:=]\s*["\']?([A-Za-z0-9+/=]{20,80})["\']?'''
+secretGroup = 1
+keywords = ["aws_secret_access_key"]
+tags = ["credential", "datadawn-shape", "r2", "aws-named"]
