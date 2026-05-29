@@ -832,10 +832,10 @@
                 html += '<div class="section-title">Officers &amp; Key Employees</div>';
                 try {
                     const officers = await query(`
-                        SELECT person_name AS name, title, avg_hours_per_week AS hours, compensation
+                        SELECT person_name AS name, title, avg_hours_per_week AS hours, reportable_comp_filing_org AS compensation
                         FROM officers
                         WHERE object_id = '${sqlEsc(objectId)}'
-                        ORDER BY compensation DESC
+                        ORDER BY reportable_comp_filing_org DESC
                         LIMIT 25
                     `);
                     if (officers.length) {
