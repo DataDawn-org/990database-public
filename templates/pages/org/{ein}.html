@@ -27,9 +27,27 @@
 {% set grants_made = sql("SELECT g.id, g.recipient_name, g.recipient_city, g.recipient_state, g.amount, g.purpose, g.grant_date, g.grant_type, r2.tax_year FROM grants g LEFT JOIN returns r2 ON r2.object_id = g.object_id WHERE g.ein = :ein AND g.grant_type = 'paid' ORDER BY g.amount DESC LIMIT 100", {"ein": ein}, database="990data_public") %}
 
 {% set org_name_for_match = bmf_rows[0]["name"] if bmf_rows else filings[0]["org_name"] %}
-{% set org_fts_query = '"' + (org_name_for_match|replace('"', '')) + '"' if org_name_for_match else '' %}
+{% set org_state_match = (bmf_rows[0]["state"] if bmf_rows else (filings[0]["state"] if filings else "")) or "" %}
+{# `grants` (990-PF Part XV) carries a recipient NAME but NO recipient EIN, so incoming private-foundation grants can
+   only be matched to this org by name. RESOLVE-OR-DISCLOSE (methodology §3c): attribute a name-matched list to THIS
+   org ONLY when its exact name is globally UNIQUE in the IRS BMF (no other registered org can own those grants). When
+   the exact name is shared by >1 EIN — a federated org (Salvation Army, Red Cross, YMCA…) OR an unrelated namesake —
+   name+geography cannot pin a free-text grant record to this specific EIN, so we DISCLOSE the ambiguity and route to a
+   name search rather than assert an attribution under this org's header. NOTE: state-uniqueness is a FALSE-POSITIVE
+   resolve test for federations (one HQ per state, thousands of same-named local units all writing the bare name), so
+   the gate is global uniqueness, not "unique after narrowing to this state." See followup_queue #61 + the §518B
+   Salvation-Army over-merge. EIN-exact received grants are the separate, exact Schedule I section below. #}
+{% set org_name_count_rows = sql("SELECT COUNT(DISTINCT ein) AS n FROM bmf WHERE name = :nm COLLATE NOCASE", {"nm": org_name_for_match}, database="990data_public") if org_name_for_match else [] %}
+{% set org_name_shared_count = (org_name_count_rows[0]["n"] if org_name_count_rows else 0) %}
+{% set org_name_unique = org_name_shared_count == 1 %}
 
-{% set pf_grants_received = sql("SELECT g.id, g.ein AS funder_ein, b.name AS funder_name, g.amount, g.purpose, g.grant_date, g.recipient_name, r2.tax_year FROM fts_grants ft JOIN grants g ON g.id = ft.rowid LEFT JOIN returns r2 ON r2.object_id = g.object_id LEFT JOIN bmf b ON b.ein = g.ein WHERE ft.recipient_name MATCH :org_fts AND g.grant_type = 'paid' ORDER BY g.amount DESC LIMIT 100", {"org_fts": org_fts_query}, database="990data_public") if org_fts_query else [] %}
+{# UNIQUE name → exact-name match (recipient_name = :nm COLLATE NOCASE hits idx_grants_recip_type; EXACT, replacing the
+   old FTS phrase-CONTAINS that swept sibling names like "<Org> Greater NY Division" — a different EIN — into this page). #}
+{% set pf_grants_received = sql("SELECT g.id, g.ein AS funder_ein, b.name AS funder_name, g.amount, g.purpose, g.grant_date, g.recipient_name, r2.tax_year FROM grants g LEFT JOIN returns r2 ON r2.object_id = g.object_id LEFT JOIN bmf b ON b.ein = g.ein WHERE g.recipient_name = :nm COLLATE NOCASE AND g.grant_type = 'paid' ORDER BY g.amount DESC LIMIT 100", {"nm": org_name_for_match}, database="990data_public") if (org_name_for_match and org_name_unique) else [] %}
+
+{# SHARED name → existence check only (so we don't render a disclosure about grants that don't exist; indexed COUNT). #}
+{% set pf_shared_count_rows = sql("SELECT COUNT(*) AS n FROM grants WHERE recipient_name = :nm COLLATE NOCASE AND grant_type = 'paid'", {"nm": org_name_for_match}, database="990data_public") if (org_name_for_match and not org_name_unique) else [] %}
+{% set pf_shared_named_exist = (pf_shared_count_rows[0]["n"] if pf_shared_count_rows else 0) > 0 %}
 
 {% set grants_received = sql("SELECT si.id, si.ein AS funder_ein, b.name AS funder_name, si.recipient_ein, r2.tax_year, si.cash_grant_amt, si.purpose FROM schedule_i_990 si LEFT JOIN returns r2 ON r2.object_id = si.object_id LEFT JOIN bmf b ON b.ein = si.ein WHERE si.recipient_ein = :ein ORDER BY si.cash_grant_amt DESC LIMIT 50", {"ein": ein}, database="990data_public") %}
 
@@ -240,9 +258,13 @@
 </div>
 {% endif %}
 
-{% if pf_grants_received %}
+{# ── Foundation Grants Received — RESOLVE-OR-DISCLOSE (followup_queue #61). PF grants carry no recipient EIN. ── #}
+{% if org_name_unique and pf_grants_received %}
+{# RESOLVE: the exact name is globally unique in the BMF, so a name match can only be this org (modulo variant
+   spellings) — show it as a verify-lead, NO aggregate total asserted. #}
 <div class="section">
-  <h2 class="section-title">Foundation Grants Received (Top 50)</h2>
+  <h2 class="section-title">Foundation Grants Received <span style="font-weight:400;color:var(--text-muted);font-size:0.65em;white-space:nowrap;">matched by name</span></h2>
+  <p style="color:var(--text-muted);font-size:0.85rem;margin-top:-0.5rem;">Private-foundation grants naming this organization as recipient. Grant records carry no recipient EIN, so these are matched on name; this exact name is unique in the IRS registry, but the list may still omit grants filed under a variant spelling. <em>Treat as a lead and verify against the source filing before citing.</em> (The Schedule I section below is matched by EIN and is exact.)</p>
   <div class="table-wrap">
   <table class="data-table">
     <thead>
@@ -265,6 +287,21 @@
     </tbody>
   </table>
   </div>
+</div>
+{% elif (not org_name_unique) and pf_shared_named_exist %}
+{# DISCLOSE: the name is shared by >1 registered org and PF grants carry no recipient EIN, so a name-matched total
+   cannot be attributed to THIS org. We disclose rather than guess (resolve-or-disclose, methodology §3c) and route
+   to a name search, where the framing — "grants naming this organization" — is true. The search link is load-bearing:
+   bare suppression would be a dead-end; this moves the data into a frame that is honest about what it is. #}
+<div class="section">
+  <h2 class="section-title">Foundation Grants Received</h2>
+  <p style="color:var(--text-muted);font-size:0.9rem;line-height:1.55;">
+    The name &ldquo;{{ org_name }}&rdquo; is shared by <strong>{{ "{:,}".format(org_name_shared_count) }}</strong> tax-exempt organizations in the IRS registry &mdash; a federated organization (a national body and its local affiliates) or unrelated namesakes. Private-foundation grant records carry no recipient EIN, so grants naming &ldquo;{{ org_name }}&rdquo; <strong>cannot be attributed to this organization</strong> specifically. Rather than guess, DataDawn does not aggregate them here.
+  </p>
+  <p style="margin-top:0.7rem;">
+    <a style="color:var(--dawn-amber);font-weight:500;text-decoration:none;" href="https://datadawn.org/explore.html?tab=grants&amp;q={{ org_name|urlencode }}{% if org_state_match %}&amp;state={{ org_state_match|urlencode }}{% endif %}">Search private-foundation grants naming &ldquo;{{ org_name }}&rdquo;{% if org_state_match %} in {{ org_state_match }}{% endif %} &rarr;</a>
+  </p>
+  <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.5rem;">Grants received by this organization under its exact EIN appear in the Schedule I section below.</p>
 </div>
 {% endif %}
 
