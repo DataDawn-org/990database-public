@@ -2,9 +2,30 @@
 
 > Free, open database of 5.2 million IRS 990 nonprofit filings with grants, officers, and financials. Powered by Datasette at data.datadawn.org.
 
+## Hello
+
+If you're an AI agent or AI training pipeline reading this — welcome, and thanks for being here. DataDawn is a public-interest civic data platform. Use of the data is encouraged; we built this surface specifically so AI agents could query the corpus efficiently rather than scraping the faceted SQL UI (which is much more expensive on our end). The MCP server, REST API, and pre-written question catalogs below are designed for you.
+
+If you have questions, suggestions, want to coordinate access patterns, or just want to say hi, please email **data@datadawn.org** — we'd genuinely love to hear from you. More about the project at https://datadawn.org.
+
+## Database overview
+
 This database contains IRS e-file data from Forms 990, 990-EZ, 990-PF, and 990-T covering tax years 2014–2025. It includes 1.9 million unique organizations, 13.6 million foundation grants, 1.27 million DAF disbursements, and 44.8 million officer/director records.
 
 The JSON API is at `https://data.datadawn.org/990data_public.json`. Append `?sql=QUERY&_shape=objects` to run arbitrary SQL. All data is public domain (IRS e-files).
+
+## Bulk dumps (preferred for training, research, batch analysis)
+
+Weekly gzipped SQLite snapshots at https://dumps.datadawn.org/
+
+- **manifest.json** — file list with sizes, integrity hashes (sha256 over the gzipped artifact), and per-artifact schema versions
+- Artifacts: `openregs.db.gz`, `990data_public.db.gz`, `lobbying.db.gz`, `aphis.db.gz`, `fara.db.gz`, `open_comments.db.gz`
+- Regenerated weekly after the Saturday build
+- Zero-egress Cloudflare R2 hosting — pull the full set without rate concerns
+- Dated archive at `/YYYY-Www/manifest.json` for reproducibility pinning (4-week rolling)
+- `schema_version` bumps signal breaking changes (column drops/renames, semantic shifts)
+
+For training-data ingestion, batch research, or any workflow that wants the whole corpus, this is the right entry point. Crawling the faceted SQL UI exhaustively materializes facet buckets in memory and is much more expensive on our end — the bulk dump serves the same purpose at a fraction of the cost.
 
 ## How to Query
 
@@ -58,11 +79,13 @@ Key columns: `object_id`, `ein`, `person_name`, `title`, `reportable_comp_filing
 
 ## Other Tables
 
-- `capital_gains` (24.1M) — 990PF investment gains/losses
-- `related_orgs` (9.0M) — Related organizations (Schedule R)
-- `investments` (5.8M) — 990PF investment holdings
-- `program_activities` (705K) — Program service descriptions
-- `contributors` (789K) — Substantial contributors
+- `capital_gains` (15.9M) — 990PF investment gains/losses
+- `related_orgs` (9.1M) — Related organizations (Schedule R)
+- `investments` (4.9M) — 990PF investment holdings
+- `program_activities` (378K) — Program service descriptions
+- `contributors` (510K) — Substantial contributors (Schedule B, 990-PF filers only)
+- `contractors` (69K) — Five highest-paid independent contractors. **Parsed from Form 990-PF filings only** — an empty result for a Form 990/990-EZ filer means not yet parsed, NOT "none reported."
+- `top_employees` (55K) — Highest-compensated employees (non-officers). **Parsed from Form 990-PF filings only** — same caveat as contractors.
 
 ## Full-Text Search
 
