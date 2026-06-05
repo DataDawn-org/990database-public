@@ -42,12 +42,10 @@ jobs:
           # Only scans lines ADDED in this PR (lines starting with '+' but not
           # '+++' file headers). Pre-existing matches in untouched lines are
           # ignored — that's the design.
-          # 'someones-backup' is a known-accepted pre-existing B2 bucket name
           # (decision recorded 2026-05-12) and is stripped before scanning.
           added=$(git diff "$base..$head" --no-color | grep -E '^\+[^+]' || true)
-          cleaned=$(echo "$added" | sed 's/someones-backup//g')
 
-          if echo "$cleaned" | grep -qiE "$LEAK_PATTERN"; then
+          if echo "$added" | grep -qiE "$LEAK_PATTERN"; then
             # IMPORTANT: do not echo matched content. Actions logs are public
             # and forever-retained — printing the matched lines would re-leak
             # the exact content we're catching. Authors should run the scan

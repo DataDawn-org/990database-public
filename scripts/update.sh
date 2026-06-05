@@ -28,7 +28,7 @@ REMOTE_HOST="user@YOUR_SERVER_IP"
 REMOTE_DB_PATH="/opt/datasette/990data_public.db"
 REMOTE_BACKUP_DIR="/opt/datasette/backups"
 LOCAL_BACKUP_DIR="$PROJECT_DIR/backups"
-B2_REMOTE="b2:someones-backup/990-weekly"
+B2_REMOTE="b2:your-b2-bucket/990-weekly"
 ROTATE_HELPER="/mnt/data/datadawn/openregs/deploy/rotate_local_backups.py"
 
 # SSH keepalive + timeout options applied to every ssh/scp/rsync call below.
