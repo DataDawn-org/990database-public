@@ -23,8 +23,8 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 | `contributors` | 506,838 | Schedule B contributors (990-PF only) |
 | `program_activities` | 374,098 | 990/990-EZ program service descriptions |
 | `program_investments` | 211,210 | 990-PF program-related investments (Part IX-B) |
-| `contractors` | 68,737 | Top 5 independent contractors |
-| `top_employees` | 54,708 | Highest-compensated employees (990/990-EZ) |
+| `contractors` | 69,108 | Top 5 independent contractors (990-PF only) |
+| `top_employees` | 54,988 | Highest-compensated employees (990-PF only) |
 | `bmf` | 1,935,635 | IRS Business Master File (NTEE codes, subsection, status) |
 
 **Total**: ~102 million records across 14 tables.
@@ -111,8 +111,8 @@ See `schema.sql` for the full DDL. The 14 core tables are:
 - **`investments`** — 990-PF Part II investments (corporate bonds, government securities, land, other).
 - **`program_activities`** — 990/990-EZ program service accomplishments.
 - **`program_investments`** — 990-PF Part IX-B program-related investments.
-- **`contractors`** — Top 5 independent contractors by compensation.
-- **`top_employees`** — Highest-compensated employees on 990/990-EZ.
+- **`contractors`** — Five highest-paid independent contractors by compensation. Currently parsed from **Form 990-PF only** (Part VIII); the Form 990 equivalent (Part VII Section B) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not "none reported."
+- **`top_employees`** — Highest-compensated employees (other than officers). Currently parsed from **Form 990-PF only** (Part VIII); the Form 990 equivalent (Part VII Section A) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not "none reported."
 
 ### Reference data
 - **`bmf`** — IRS Business Master File: NTEE codes, subsection, ruling dates, financial summary codes.
