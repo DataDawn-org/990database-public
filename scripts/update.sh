@@ -970,6 +970,57 @@ else
 METADATA_EOF
     log "Metadata updated"
 
+    # Refresh llms_990.txt structured counts + deploy it (2026-06-05).
+    # The file was previously hand-maintained AND deployed by nothing — it
+    # drifted bidirectionally (the live copy taught agents the deprecated
+    # officers.compensation column; the local copy missed the live welcome
+    # section). Canonical copy = $PROJECT_DIR/llms_990.txt: prose edits stay
+    # manual there; the parenthesized table counts on "### table (N rows)"
+    # and "- \`table\` (N)" lines auto-refresh here from the public DB so
+    # they can't rot; then the file rides every monthly deploy.
+    log "Refreshing llms_990.txt counts + deploying..."
+    if python3 - "$PROJECT_DIR/llms_990.txt" "$PUBLIC_DB" >> "$LOG_FILE" 2>&1 <<'LLMS_EOF'
+import re, sqlite3, sys
+path, db = sys.argv[1], sys.argv[2]
+con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+tables = {r[0] for r in con.execute(
+    "SELECT name FROM sqlite_schema WHERE type='table'")}
+def fmt(n):
+    if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+    if n >= 1_000: return f"{round(n/1_000)}K"
+    return str(n)
+def count(t):
+    return con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+src = open(path).read()
+out, refreshed = src, 0
+# Core-table headers: "### returns (5.2M rows)"
+for m in re.finditer(r'^### (\w+) \([^)]*\)', src, re.M):
+    t = m.group(1)
+    if t in tables:
+        out = out.replace(m.group(0), f"### {t} ({fmt(count(t))} rows)")
+        refreshed += 1
+# Other-table bullets: "- `capital_gains` (15.9M)"
+for m in re.finditer(r'^- `(\w+)` \([^)]*\)', src, re.M):
+    t = m.group(1)
+    if t in tables:
+        out = out.replace(m.group(0), f"- `{t}` ({fmt(count(t))})")
+        refreshed += 1
+if refreshed == 0:
+    print("llms refresh: 0 count lines matched — file format changed? NOT writing", file=sys.stderr)
+    sys.exit(3)
+open(path, 'w').write(out)
+print(f"llms refresh: {refreshed} count lines refreshed")
+LLMS_EOF
+    then
+        if scp $SSH_OPTS "$PROJECT_DIR/llms_990.txt" "$REMOTE_HOST:/opt/datasette/llms_990.txt" >> "$LOG_FILE" 2>&1; then
+            log "llms_990.txt refreshed + deployed"
+        else
+            log "WARNING: llms_990.txt scp failed (non-fatal — live copy stays on previous generation)"
+        fi
+    else
+        log "WARNING: llms_990.txt count refresh failed (non-fatal — NOT deployed; see log)"
+    fi
+
     log "Restarting Datasette..."
     ssh $SSH_OPTS "$REMOTE_HOST" 'sudo systemctl restart datasette'
     log "Datasette restarted"
