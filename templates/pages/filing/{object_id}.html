@@ -394,6 +394,15 @@
 </div>
 {% endif %}
 
+{# Parser-coverage disclosure (2026-06-05): top_employees/contractors are
+   parsed from Form 990-PF only. On non-PF filings the two sections above
+   never render — without this note, their absence reads as "reported none"
+   when comparing against a PF filing. Remove when the Form 990 parsers
+   (Bug #1/#2) ship. #}
+{% if not is_pf %}
+<p style="color:var(--text-muted);font-size:0.85rem;">Highest-compensated employee and independent-contractor details are currently parsed from Form 990-PF filings only &mdash; this {{ f["return_type"] }} filing&rsquo;s equivalents are not yet parsed. Their absence on this page does not mean none were reported.</p>
+{% endif %}
+
 {% set prog_acts = sql("SELECT pa.activity_num, pa.description, pa.expenses FROM program_activities pa WHERE pa.object_id = :object_id ORDER BY pa.activity_num", {"object_id": object_id}, database="990data_public") %}
 
 {% if prog_acts %}
