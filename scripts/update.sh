@@ -1008,17 +1008,38 @@ for m in re.finditer(r'^- `(\w+)` \([^)]*\)', src, re.M):
 if refreshed == 0:
     print("llms refresh: 0 count lines matched — file format changed? NOT writing", file=sys.stderr)
     sys.exit(3)
+# Semantic-drift guard (2026-06-05): execute every ```sql example block
+# against the public DB. The worst llms drift wasn't a stale count — it was
+# an example query teaching the deprecated officers.compensation column.
+# A dropped/renamed column or table makes its example DIE here, loudly,
+# instead of being served to agents for months. LIMIT 1 wrap keeps it cheap.
+sql_blocks = re.findall(r'```sql\n(.*?)```', out, re.S)
+if not sql_blocks:
+    print("llms guard: 0 sql example blocks found — file format changed? NOT writing", file=sys.stderr)
+    sys.exit(3)
+failures = 0
+for i, q in enumerate(sql_blocks, 1):
+    q = q.strip().rstrip(';')
+    try:
+        con.execute(f"SELECT * FROM ({q}) LIMIT 1").fetchall()
+    except sqlite3.Error as e:
+        print(f"llms guard: example query #{i} FAILED against the public DB: {e}", file=sys.stderr)
+        failures += 1
+if failures:
+    print(f"llms guard: {failures}/{len(sql_blocks)} example queries broken — NOT writing/deploying", file=sys.stderr)
+    sys.exit(4)
 open(path, 'w').write(out)
-print(f"llms refresh: {refreshed} count lines refreshed")
+print(f"llms refresh: {refreshed} count lines refreshed; {len(sql_blocks)} example queries executed OK")
 LLMS_EOF
     then
         if scp $SSH_OPTS "$PROJECT_DIR/llms_990.txt" "$REMOTE_HOST:/opt/datasette/llms_990.txt" >> "$LOG_FILE" 2>&1; then
-            log "llms_990.txt refreshed + deployed"
+            log "llms_990.txt refreshed + example queries verified + deployed"
         else
             log "WARNING: llms_990.txt scp failed (non-fatal — live copy stays on previous generation)"
         fi
     else
-        log "WARNING: llms_990.txt count refresh failed (non-fatal — NOT deployed; see log)"
+        log "ERROR: llms_990.txt refresh/query-guard FAILED — NOT deployed (see log; broken example = semantic drift, fix before next deploy)"
+        SMOKE_FAILED=1
     fi
 
     log "Restarting Datasette..."
@@ -1043,7 +1064,9 @@ LLMS_EOF
     # non-zero at the end and the cron's hc.io ping alerts. Added 2026-05-10.
     sleep 5  # let Datasette warmup get going; COUNT(*) is fast even cold
     log "Post-deploy smoke test (prod vs local row counts)..."
-    SMOKE_FAILED=0
+    # Preserving init (2026-06-05): the llms_990.txt refresh/query-guard above
+    # may already have set SMOKE_FAILED=1 — a plain =0 here would clobber it.
+    SMOKE_FAILED=${SMOKE_FAILED:-0}
     # Smoke-test table list comes from criticality.json (single source of truth
     # shared with the floor + delta guards). Adding a table to the smoke set
     # means flipping `smoke: true` in criticality.json — no code edit here.
