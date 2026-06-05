@@ -43,7 +43,7 @@ Key parameters:
 
 ## Core Tables
 
-### returns (5.2M rows)
+### returns (5.3M rows)
 One row per IRS filing. The central table — `object_id` links to all detail tables.
 
 Key columns: `object_id` (PK), `ein`, `org_name`, `state`, `tax_year`, `return_type` (990/990EZ/990PF/990T), `total_revenue`, `total_expenses`, `total_assets_eoy`, `contributions_received`, `contributions_paid`, `fmv_assets_eoy`, `qualifying_distributions`, `ntee_code`
@@ -55,14 +55,14 @@ IRS Business Master File — reference table of all tax-exempt organizations.
 
 Key columns: `ein` (PK), `name`, `city`, `state`, `subsection` (03=501(c)(3), 04=501(c)(4)), `ntee_cd`, `asset_amt`, `income_amt`
 
-### grants (13.6M rows)
+### grants (13.8M rows)
 Foundation grants from 990-PF filings.
 
 Key columns: `id` (PK), `object_id`, `ein` (**this is the FUNDER EIN, not the recipient**), `recipient_name`, `recipient_city`, `recipient_state`, `amount`, `purpose`, `grant_type` (paid/future/exp_responsibility)
 
 **IMPORTANT**: `grants.ein` is the FUNDER, not the recipient. Match recipients by `recipient_name`. Always filter `grant_type = 'paid'` unless you want future commitments.
 
-### schedule_i_grants (1.27M rows)
+### schedule_i_grants (1.3M rows)
 DAF (Donor-Advised Fund) disbursements from 19 major sponsors (Fidelity Charitable, Schwab, Vanguard, etc.).
 
 Key columns: `id` (PK), `funder_ein`, `funder_name`, `recipient_name`, `recipient_ein`, `amount`, `purpose`, `tax_year`
@@ -72,7 +72,7 @@ Public charity grants — Schedule I from 990/990-EZ filers.
 
 Key columns: `id` (PK), `object_id`, `ein` (funder), `recipient_name`, `recipient_ein`, `cash_grant_amt`, `purpose`
 
-### officers (44.8M rows)
+### officers (43.6M rows)
 Officers, directors, trustees, and key employees.
 
 Key columns: `object_id`, `ein`, `person_name`, `title`, `reportable_comp_filing_org` (W-2 from filing org, ALL forms), `reportable_comp_related_org` (Form 990 ONLY — W-2 from related orgs), `other_compensation` (Form 990 ONLY — IRS "other comp" lump), `benefits` (990-EZ + 990-PF ONLY), `expense_account` (990-EZ + 990-PF ONLY). The legacy `compensation` column is being deprecated — use `reportable_comp_filing_org`. See `officer_total_comp` view for cross-form total.
