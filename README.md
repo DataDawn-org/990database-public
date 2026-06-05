@@ -14,20 +14,20 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 |-------|---------|-------------|
 | `returns` | 5,210,981 | 990/990-PF/990-EZ filings (tax years 2014–2025) |
 | `grants` | 13,609,220 | 990-PF grants paid, future grants, expenditure responsibility |
-| `officers` | 44,762,634 | Officers, directors, trustees, key employees |
+| `officers` | 43,589,423 | Officers, directors, trustees, key employees |
 | `schedule_i_990` | 6,393,046 | Schedule I grants (990/990-EZ filers) |
 | `schedule_i_grants` | 1,272,399 | DAF and intermediary grant disbursements |
 | `related_orgs` | 8,540,764 | Related organizations (Schedule R) |
-| `capital_gains` | 22,774,992 | 990-PF capital gains/losses (Part IV) |
-| `investments` | 5,228,704 | 990-PF investments (Part II) |
-| `contributors` | 662,265 | Schedule B contributors (990-PF only) |
-| `program_activities` | 576,397 | 990/990-EZ program service descriptions |
-| `program_investments` | 314,487 | 990-PF program-related investments (Part IX-B) |
-| `contractors` | 77,456 | Top 5 independent contractors |
-| `top_employees` | 74,260 | Highest-compensated employees (990/990-EZ) |
+| `capital_gains` | 15,580,627 | 990-PF capital gains/losses (Part IV) |
+| `investments` | 4,897,384 | 990-PF investments (Part II) |
+| `contributors` | 506,838 | Schedule B contributors (990-PF only) |
+| `program_activities` | 374,098 | 990/990-EZ program service descriptions |
+| `program_investments` | 211,210 | 990-PF program-related investments (Part IX-B) |
+| `contractors` | 69,108 | Top 5 independent contractors (990-PF only) |
+| `top_employees` | 54,988 | Highest-compensated employees (990-PF only) |
 | `bmf` | 1,935,635 | IRS Business Master File (NTEE codes, subsection, status) |
 
-**Total**: ~114 million records across 14 tables.
+**Total**: ~102 million records across 14 tables.
 
 ---
 
@@ -111,8 +111,8 @@ See `schema.sql` for the full DDL. The 14 core tables are:
 - **`investments`** — 990-PF Part II investments (corporate bonds, government securities, land, other).
 - **`program_activities`** — 990/990-EZ program service accomplishments.
 - **`program_investments`** — 990-PF Part IX-B program-related investments.
-- **`contractors`** — Top 5 independent contractors by compensation.
-- **`top_employees`** — Highest-compensated employees on 990/990-EZ.
+- **`contractors`** — Five highest-paid independent contractors by compensation. Currently parsed from **Form 990-PF only** (Part VIII); the Form 990 equivalent (Part VII Section B) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not "none reported."
+- **`top_employees`** — Highest-compensated employees (other than officers). Currently parsed from **Form 990-PF only** (Part VIII); the Form 990 equivalent (Part VII Section A) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not "none reported."
 
 ### Reference data
 - **`bmf`** — IRS Business Master File: NTEE codes, subsection, ruling dates, financial summary codes.
@@ -135,7 +135,7 @@ All detail tables link to `returns` via `object_id` (the IRS-assigned filing ide
 
 5. **Opaque grantmaking** — Community foundations and DAFs often report grants with generic recipient names (e.g., "various charities") or aggregate amounts. Approximately 6,100 such records exist in the `schedule_i_grants` table.
 
-6. **Contributor records limited** — Only 662,265 contributor records exist because Schedule B data is only available for 990-PF filers. 990 and 990-EZ filers' Schedule B data is redacted in the public XML.
+6. **Contributor records limited** — Only 506,838 contributor records exist because Schedule B data is only available for 990-PF filers. 990 and 990-EZ filers' Schedule B data is redacted in the public XML.
 
 7. **2021 filing gap** — Tax year 2021 has approximately 34% fewer filings than adjacent years, likely due to IRS processing backlogs during that period.
 

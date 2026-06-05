@@ -937,12 +937,30 @@ else
     O_FMT=$(echo "" | fmt "$OFFICERS_COUNT")
     RE_FMT=$(echo "" | fmt "$RELATED_COUNT")
 
+    # Per-table descriptions: parser-coverage disclosures (2026-06-05).
+    # contractors/top_employees are parsed from Form 990-PF ONLY
+    # (extract_990pf_detail.py; verified 100% of rows join return_type='990PF')
+    # — without the disclosure, an empty query result for a Form 990 filer
+    # reads as "none reported" on the SQL/API surface. Static text; remove the
+    # "not yet parsed" sentences when the Form 990 parsers ship.
     ssh $SSH_OPTS "$REMOTE_HOST" "cat > /opt/datasette/metadata.json" <<METADATA_EOF
 {
     "title": "DataDawn 990 Explorer",
     "description_html": "<p>IRS Form 990 nonprofit data: <strong>${R_FMT} returns</strong> (tax years ${TAX_YEARS}), <strong>${G_FMT} foundation grants</strong>, <strong>${D_FMT} DAF disbursements</strong>, <strong>${S_FMT} Schedule I grants</strong>, <strong>${O_FMT} officers/directors</strong>, and <strong>${RE_FMT} related org relationships</strong>.</p>",
     "license": "Public Domain (IRS data)",
     "license_url": "https://www.irs.gov/privacy-disclosure/irs-privacy-policy",
+    "databases": {
+        "990data_public": {
+            "tables": {
+                "contractors": {
+                    "description_html": "Five highest-paid independent contractors, currently parsed from <strong>Form 990-PF filings only</strong> (Part VIII). The equivalent Form 990 data (Part VII Section B) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not “none reported.”"
+                },
+                "top_employees": {
+                    "description_html": "Highest-compensated employees (other than officers), currently parsed from <strong>Form 990-PF filings only</strong> (Part VIII). The equivalent Form 990 data (Part VII Section A) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not “none reported.”"
+                }
+            }
+        }
+    },
     "plugins": {
         "datasette-cors": {
             "allow_all": true
