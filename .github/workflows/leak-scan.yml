@@ -3,6 +3,16 @@ name: Leak scan
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  schedule:
+    # Weekly whole-tree sweep (scan-tree job only): catches drift that lands
+    # between PRs — web edits, API commits, hook-bypassed pushes.
+    - cron: '47 13 * * 1'
+  workflow_dispatch:
+    inputs:
+      selftest:
+        description: 'true = deliberately fail scan-tree to test-fire the alert path'
+        required: false
+        default: 'false'
 
 permissions:
   contents: read
@@ -15,6 +25,8 @@ env:
 
 jobs:
   scan:
+    # Added-lines scan: PR events only (scheduled/manual runs have no diff).
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,3 +66,67 @@ jobs:
             exit 1
           fi
           echo "OK: no leak markers in added lines."
+
+  scan-tree:
+    # Whole-tree identity scan — the server-side backstop. The local
+    # pre-commit/pre-push hooks are per-clone (they do not survive
+    # `git clone`) and `git push --no-verify` bypasses them; the added-lines
+    # job above never sees pre-existing residuals. This job greps the ENTIRE
+    # tracked tree on every PR and on a weekly schedule, so a marker lands
+    # red regardless of how it arrived. Semantics mirror the local pre-push
+    # gate exactly (line-filter allowlist, no binary skip) so the two layers
+    # always agree about the same tree.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test failure (alert-path test fire — not a leak)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.selftest == 'true'
+        run: |
+          echo "::error::Deliberate self-test failure (workflow_dispatch selftest=true) to exercise the alert path. Not a leak."
+          exit 1
+
+      - name: Whole-tree scan for operator/identity leak markers
+        env:
+          LEAK_PATTERN: ${{ secrets.LEAK_PATTERN }}
+        run: |
+          set -uo pipefail
+          if [ -z "$LEAK_PATTERN" ]; then
+            echo "::error::LEAK_PATTERN secret is unset on this repo. Set it via 'gh secret set LEAK_PATTERN'."
+            exit 1
+          fi
+          # Committable allowlist of sanitization placeholders — the tokens
+          # are public by design; the PATTERN stays a secret. Line-filter
+          # semantics (a line containing a placeholder passes), matching the
+          # local pre-push gate. Do NOT grow this list to silence a hit —
+          # sanitize the occurrence instead.
+          ALLOW='YOUR_SERVER_IP|your-b2-bucket'
+          # Matches are held in a variable and NEVER echoed: Actions logs are
+          # public and forever-retained — printing matches would re-leak the
+          # exact content this job exists to catch.
+          hits=$(git grep -inE "$LEAK_PATTERN" -- . 2>/dev/null | grep -viE "$ALLOW" || true)
+          if [ -n "$hits" ]; then
+            nlines=$(printf '%s\n' "$hits" | wc -l)
+            nfiles=$(printf '%s\n' "$hits" | cut -d: -f1 | sort -u | wc -l)
+            echo "::error::Identity marker present in the committed tree: ${nlines} line(s) across ${nfiles} file(s). Run the whole-tree scan locally (leak-detection/pre-push semantics) to locate them; matched content is never printed here."
+            exit 1
+          fi
+          echo "OK: whole tree clean."
+
+      - name: Report to healthchecks.io (scheduled/manual runs only)
+        # PR verdicts surface in the PR itself; the scheduled half needs a
+        # wired alert or it is monitor-theater — so a missing ping URL is
+        # itself a failure, never silently green.
+        if: always() && github.event_name != 'pull_request'
+        env:
+          HC_URL: ${{ secrets.LEAK_TREE_HC_URL }}
+        run: |
+          if [ -z "${HC_URL:-}" ]; then
+            echo "::error::LEAK_TREE_HC_URL secret is unset — a scheduled scan without a wired alert is monitor-theater. Set it via 'gh secret set LEAK_TREE_HC_URL'."
+            exit 1
+          fi
+          if [ "${{ job.status }}" = "success" ]; then
+            curl -fsS -m 10 --retry 3 "$HC_URL" > /dev/null
+          else
+            curl -fsS -m 10 --retry 3 "$HC_URL/fail" > /dev/null
+          fi
