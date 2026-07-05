@@ -154,6 +154,18 @@ The update script can optionally deploy to a Datasette instance. Set `REMOTE_HOS
 
 ---
 
+## Mirror-sync conventions
+
+This repository mirrors the maintainer's working scripts. Synced files are byte-identical to source, with one deliberate exception: **`scripts/extract_990.py` carries three portability adaptations that must survive every sync** — do not "correct" them back to absolute paths:
+
+1. Docstring paths are relative (`./{2019..2026}`, `./990data.db`), not the maintainer's local layout.
+2. `from pathlib import Path` is added to the imports.
+3. `BASE_DIR = str(Path(__file__).resolve().parent.parent)` replaces the hard-coded local directory.
+
+Any other divergence between this repo and the source scripts is drift, not convention, and should be closed by a sync PR.
+
+---
+
 ## License
 
 This project is licensed under [Creative Commons Zero v1.0 Universal](LICENSE). All IRS-sourced data is in the public domain.
