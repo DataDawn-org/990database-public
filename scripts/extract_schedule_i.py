@@ -8,7 +8,7 @@ This is how 990 filers (public charities) report their grantmaking.
 990-PF filers report grants in Part XV (already extracted into grants table).
 """
 
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET  # XXE-hardened drop-in for stdlib xml.etree
 import sqlite3
 import sys
 import os

@@ -3,7 +3,8 @@
   "_comment_fields": {
     "floor": "Minimum row count below which the build aborts before deploy. Set to null for tables you want delta/smoke coverage on but no absolute floor.",
     "growth": "'incremental' = monotonically grows over time; any drop > 0.1% beyond noise is fatal in the delta guard. 'rebuild' = wiped+repopulated each run (e.g., DROP TABLE IF EXISTS + extract); 5% drop tolerated in delta guard.",
-    "smoke": "true = include in post-deploy smoke test (prod row count vs local). Keep this set small (~5 tables, top by row volume) since each table = one extra HTTPS round-trip to prod."
+    "smoke": "true = include in post-deploy smoke test (prod row count vs local). Keep this set small (~5 tables, top by row volume) since each table = one extra HTTPS round-trip to prod.",
+    "dup_check": "true = run the duplication guard: COUNT(*) vs COUNT(DISTINCT all-non-id-columns); fails the build if duplicate rows exceed dup_ceiling_pct (default 10.0). Scope to detail-extraction tables prone to parser fan-out. Catches duplicate-row inflation, which the drop-only delta guard reads as healthy growth."
   },
   "tables": {
     "returns": {
@@ -37,9 +38,10 @@
       "smoke": true
     },
     "capital_gains": {
-      "floor": 20000000,
+      "floor": 14000000,
       "growth": "incremental",
-      "smoke": true
+      "smoke": true,
+      "dup_check": true
     },
     "related_orgs": {
       "floor": 7500000,
@@ -47,9 +49,10 @@
       "smoke": true
     },
     "investments": {
-      "floor": 5000000,
+      "floor": 4000000,
       "growth": "incremental",
-      "smoke": true
+      "smoke": true,
+      "dup_check": true
     },
     "contractors": {
       "floor": null,
@@ -59,7 +62,8 @@
     "contributors": {
       "floor": null,
       "growth": "incremental",
-      "smoke": true
+      "smoke": true,
+      "dup_check": true
     },
     "top_employees": {
       "floor": null,
@@ -69,12 +73,14 @@
     "program_activities": {
       "floor": null,
       "growth": "incremental",
-      "smoke": true
+      "smoke": true,
+      "dup_check": true
     },
     "program_investments": {
       "floor": null,
       "growth": "incremental",
-      "smoke": true
+      "smoke": true,
+      "dup_check": true
     }
   }
 }
