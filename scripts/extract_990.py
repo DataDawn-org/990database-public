@@ -11,13 +11,17 @@ Usage:
 """
 
 import logging
-from pathlib import Path
 import multiprocessing as mp
 import os
+from pathlib import Path
 import sqlite3
 import sys
 import time
 from lxml import etree as ET
+
+# XXE-hardened parser for IRS XML — disable external entities + network DTD lookup
+# (per-worker module-level constant; lxml XMLParser is process-safe after fork).
+_SAFE_PARSER = ET.XMLParser(resolve_entities=False, no_network=True)
 
 # ── Configuration ──────────────────────────────────────────────────────────
 BASE_DIR = str(Path(__file__).resolve().parent.parent)
@@ -34,6 +38,18 @@ COLUMNS = [
     "return_type", "ntee_code", "total_revenue", "total_expenses",
     "program_expenses", "fundraising_expenses", "management_expenses",
     "total_assets_eoy", "officer_comp", "source_file", "parse_error",
+    # 2026-05-24 (4b fix, issue #7): revenue-detail + balance-sheet fields for
+    # Form 990 / 990-EZ. Previously 100% NULL for these two form types — only
+    # extract_990pf_detail.py populated them (for 990-PF). These columns are
+    # ADD COLUMN'd by extract_990pf_detail.create_schema() on existing DBs;
+    # we include them in CREATE TABLE + INSERT here so fresh builds carry them
+    # and the 990/990-EZ extractors below can write them at insert time.
+    # PF rows get NULL here at insert, then UPDATE'd by extract_990pf_detail.py.
+    "contributions_received", "dividends", "interest_income",
+    "net_gain_sale_assets", "contributions_paid", "fmv_assets_eoy",
+    "net_assets_eoy",
+    # §2 Deliverable A new fields (Phase-1 dev port):
+    "total_functional_expenses", "return_version", "contractors_over_100k_cnt",
 ]
 
 INSERT_SQL = f"""
@@ -62,7 +78,24 @@ def create_schema(con):
             total_assets_eoy     INTEGER,
             officer_comp         INTEGER,
             source_file          TEXT,
-            parse_error          TEXT
+            parse_error          TEXT,
+            -- Revenue-detail + balance-sheet fields (4b fix, issue #7, 2026-05-24).
+            -- Populated for Form 990 / 990-EZ by extract_990() / extract_990ez();
+            -- for 990-PF by extract_990pf_detail.py (which also ADD COLUMNs these
+            -- + 5 more PF-only scalars on pre-existing DBs via try/except ALTER).
+            contributions_received INTEGER,
+            dividends              INTEGER,
+            interest_income        INTEGER,
+            net_gain_sale_assets   INTEGER,
+            contributions_paid     INTEGER,
+            fmv_assets_eoy         INTEGER,
+            net_assets_eoy         INTEGER,
+            -- §2 Deliverable A new fields (Phase-1 dev port). INTEGER affinity for the numerics so
+            -- SQLite coerces on insert (the affinity assertion in parser_harness rails this); on
+            -- EXISTING DBs the land applies the equivalent `ALTER TABLE returns ADD COLUMN ... INTEGER`.
+            total_functional_expenses  INTEGER,
+            return_version             TEXT,
+            contractors_over_100k_cnt  INTEGER
         );
         -- idx_ein removed 2026-04-11: subset of idx_returns_ein_type and idx_returns_ein_year_oid
         CREATE INDEX IF NOT EXISTS idx_return_type ON returns(return_type);
@@ -121,6 +154,21 @@ def find_text(el, dotted_path):
     return node.text
 
 
+def first_text(el, *dotted_paths):
+    """Return text of the first dotted-path that resolves to a non-None text.
+
+    Used for the 4b revenue/balance-sheet fields (issue #7), where the IRS
+    e-file schema offers a true line-item element plus a Part I summary
+    fallback. Tag names were confirmed stable across 2017-2026 by a
+    schema-fingerprint pass (see decisions/4b memo), so the chains are short.
+    """
+    for path in dotted_paths:
+        txt = find_text(el, path)
+        if txt is not None:
+            return txt
+    return None
+
+
 def int_or_none(val):
     if val is None:
         return None
@@ -138,19 +186,77 @@ def extract_990(root, row):
     irs = root.find(f".//{_tag('IRS990')}")
     if irs is None:
         return
+    row["return_version"] = root.get("returnVersion")  # §2: MeF schema version (per-version grouping key)
     row["total_revenue"] = int_or_none(find_text(irs, "CYTotalRevenueAmt"))
     row["total_expenses"] = int_or_none(find_text(irs, "CYTotalExpensesAmt"))
     row["total_assets_eoy"] = int_or_none(find_text(irs, "TotalAssetsEOYAmt"))
+    row["contractors_over_100k_cnt"] = int_or_none(find_text(irs, "CntrctRcvdGreaterThan100KCnt"))  # §2: Part VII Sec B count
 
     tfe = irs.find(_tag("TotalFunctionalExpensesGrp"))
     if tfe is not None:
         row["program_expenses"] = int_or_none(find_text(tfe, "ProgramServicesAmt"))
         row["fundraising_expenses"] = int_or_none(find_text(tfe, "FundraisingAmt"))
         row["management_expenses"] = int_or_none(find_text(tfe, "ManagementAndGeneralAmt"))
+        row["total_functional_expenses"] = int_or_none(find_text(tfe, "TotalAmt"))  # §2: col-A (Part IX L25), off the SHARED tfe
 
     comp_grp = irs.find(_tag("CompCurrentOfcrDirectorsGrp"))
     if comp_grp is not None:
         row["officer_comp"] = int_or_none(find_text(comp_grp, "TotalAmt"))
+
+    # ── Revenue-detail + balance-sheet (4b fix, issue #7) ────────────────────
+    # Tag names confirmed across 2017-2026 by schema-fingerprint pass.
+    #
+    # contributions_received  Part VIII line 1h (TotalContributionsAmt);
+    #                         Part I line 8 summary (CYContributionsGrantsAmt) fallback.
+    row["contributions_received"] = int_or_none(first_text(
+        irs, "TotalContributionsAmt", "CYContributionsGrantsAmt"))
+
+    # dividends — NO separate line on the modern Form 990 e-file schema.
+    # Part VIII line 3 (InvestmentIncomeGrp) reports dividends + interest
+    # TOGETHER. Left NULL for Form 990; see 4b memo open question (i).
+    # (Form 990-PF reports them separately, hence the column exists.)
+
+    # interest_income  Part VIII line 3 recurring investment income
+    #                  (dividends + interest combined): TotalRevenueColumnAmt
+    #                  of InvestmentIncomeGrp. EXCLUDES capital gains (those are
+    #                  line 7c, captured separately below) — so this does not
+    #                  double-count with net_gain_sale_assets. We deliberately do
+    #                  NOT use the Part I line 7 summary (CYInvestmentIncomeAmt),
+    #                  which lumps in net gains.
+    inv_grp = irs.find(_tag("InvestmentIncomeGrp"))
+    if inv_grp is not None:
+        row["interest_income"] = int_or_none(find_text(inv_grp, "TotalRevenueColumnAmt"))
+
+    # net_gain_sale_assets  Part VIII line 7c (NetGainOrLossInvestmentsGrp /
+    #                       TotalRevenueColumnAmt); GainOrLossGrp/SecuritiesAmt
+    #                       fallback (securities-only subset).
+    gain_grp = irs.find(_tag("NetGainOrLossInvestmentsGrp"))
+    if gain_grp is not None:
+        row["net_gain_sale_assets"] = int_or_none(
+            find_text(gain_grp, "TotalRevenueColumnAmt"))
+    if row["net_gain_sale_assets"] is None:
+        row["net_gain_sale_assets"] = int_or_none(
+            find_text(irs, "GainOrLossGrp.SecuritiesAmt"))
+
+    # contributions_paid  Part I line 13 summary (CYGrantsAndSimilarPaidAmt).
+    #                     Per-recipient Schedule I detail is parsed separately
+    #                     into schedule_i_990 by extract_990_detail.py; this
+    #                     scalar is the filing-level total grants paid.
+    row["contributions_paid"] = int_or_none(find_text(irs, "CYGrantsAndSimilarPaidAmt"))
+
+    # fmv_assets_eoy — NOT on the main IRS990 return (0/80 across all years).
+    # FMV of investments lives on Schedule D; left NULL for Form 990. See 4b
+    # memo open question (ii). (Form 990-PF reports FMVAssetsEOYAmt directly.)
+
+    # net_assets_eoy  Part X line 33 col (B) (TotalNetAssetsFundBalanceGrp /
+    #                 EOYAmt); Part I line 22 summary (NetAssetsOrFundBalancesEOYAmt)
+    #                 fallback. Both present ~100% across years.
+    nafb_grp = irs.find(_tag("TotalNetAssetsFundBalanceGrp"))
+    if nafb_grp is not None:
+        row["net_assets_eoy"] = int_or_none(find_text(nafb_grp, "EOYAmt"))
+    if row["net_assets_eoy"] is None:
+        row["net_assets_eoy"] = int_or_none(
+            find_text(irs, "NetAssetsOrFundBalancesEOYAmt"))
 
 
 def extract_990ez(root, row):
@@ -175,6 +281,45 @@ def extract_990ez(root, row):
             found_any = True
     if found_any:
         row["officer_comp"] = comp_total
+
+    # ── Revenue-detail + balance-sheet (4b fix, issue #7) ────────────────────
+    # Tag names confirmed across 2017-2026 by schema-fingerprint pass.
+    #
+    # contributions_received  Part I line 1 (ContributionsGiftsGrantsEtcAmt).
+    row["contributions_received"] = int_or_none(
+        find_text(irs, "ContributionsGiftsGrantsEtcAmt"))
+
+    # dividends — NO separate line on Form 990-EZ. Part I line 4
+    # (InvestmentIncomeAmt) combines dividends + interest. Left NULL; see 4b
+    # memo open question (i).
+
+    # interest_income  Part I line 4 (InvestmentIncomeAmt) — combined
+    #                  dividends + interest "investment income".
+    row["interest_income"] = int_or_none(find_text(irs, "InvestmentIncomeAmt"))
+
+    # net_gain_sale_assets  Part I line 5c net (GainOrLossFromSaleOfAssetsAmt).
+    #                       NOTE: scope-doc guess "NetGainOrLossOnAssetsAmt"
+    #                       was 0/80 across all years — wrong tag.
+    row["net_gain_sale_assets"] = int_or_none(
+        find_text(irs, "GainOrLossFromSaleOfAssetsAmt"))
+
+    # contributions_paid  Part I line 10 (GrantsAndSimilarAmountsPaidAmt).
+    #                     NOTE: scope-doc guess "GrantsAndSimilarAmtsPaidAmt"
+    #                     (missing "ount") was 0/80 — wrong tag.
+    row["contributions_paid"] = int_or_none(
+        find_text(irs, "GrantsAndSimilarAmountsPaidAmt"))
+
+    # fmv_assets_eoy — no FMV detail on Form 990-EZ; left NULL.
+
+    # net_assets_eoy  Part II col (B) (NetAssetsOrFundBalancesGrp / EOYAmt,
+    #                 present ~100%); Part II line 21 scalar
+    #                 (NetAssetsOrFundBalancesEOYAmt) fallback.
+    nafb_grp = irs.find(_tag("NetAssetsOrFundBalancesGrp"))
+    if nafb_grp is not None:
+        row["net_assets_eoy"] = int_or_none(find_text(nafb_grp, "EOYAmt"))
+    if row["net_assets_eoy"] is None:
+        row["net_assets_eoy"] = int_or_none(
+            find_text(irs, "NetAssetsOrFundBalancesEOYAmt"))
 
 
 def extract_990pf(root, row):
@@ -217,7 +362,7 @@ def parse_file(filepath):
     row["source_file"] = filepath
 
     try:
-        tree = ET.parse(filepath)
+        tree = ET.parse(filepath, parser=_SAFE_PARSER)
         root = tree.getroot()
 
         return_type = find_text(root, "ReturnHeader.ReturnTypeCd")
@@ -242,6 +387,44 @@ def parse_file(filepath):
         row["parse_error"] = f"{type(e).__name__}: {e}"
 
     return row
+
+
+def _check_namespace_or_bail(sample_files):
+    """Pre-flight check: ensure IRS XML root namespace still matches the NS
+    constant our extractors hardcode. If IRS bumps the schema namespace,
+    every `find(_tag(...))` call returns None and we silently insert
+    all-NULL rows — same failure shape as the 2026-05-10 DAF incident.
+    Probing the first few files in the to-process set catches this loud
+    BEFORE we run 5M files through workers producing nothing useful.
+    Audit H3, 2026-05-15. Cost: ~3 file parses (~1 ms each).
+    """
+    if not sample_files:
+        return
+    probes = sample_files[:3]
+    mismatches = []
+    parse_failures = 0
+    for fp in probes:
+        try:
+            tree = ET.parse(fp, parser=_SAFE_PARSER)
+            root_tag = tree.getroot().tag
+            ns = root_tag.split('}')[0].lstrip('{') if '}' in root_tag else ''
+            if ns != NS:
+                mismatches.append((fp, ns))
+        except Exception as e:
+            parse_failures += 1
+            logging.warning(f"namespace probe of {fp} failed: {e}")
+    if mismatches and len(mismatches) + parse_failures == len(probes):
+        sys.stderr.write(
+            f"NAMESPACE MISMATCH: all {len(probes)} probe file(s) have unexpected "
+            f"root namespace. Expected {NS!r}.\n"
+        )
+        for fp, ns in mismatches:
+            sys.stderr.write(f"  {fp}: {ns!r}\n")
+        sys.stderr.write(
+            "IRS likely bumped the XML schema. Extract scripts must be updated "
+            "before re-running — otherwise all extracted rows will be all-NULL.\n"
+        )
+        sys.exit(2)
 
 
 def process_chunk(filepaths):
@@ -355,6 +538,9 @@ def main():
     if limit:
         todo = todo[:limit]
         logging.info(f"Limited to {len(todo):,} files")
+
+    # Pre-flight namespace check — abort loud if IRS schema bumped
+    _check_namespace_or_bail(todo)
 
     # Build chunks
     chunks = [todo[i:i + WORKER_CHUNK_SIZE]
