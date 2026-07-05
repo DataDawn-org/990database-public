@@ -73,6 +73,16 @@ def float_or_none(val):
         return None
 
 
+# §2 Deliverable A: the monthly's EIN path — single source of truth. The backfill adapter
+# (backfill_contractors._real_extractor) imports BOTH find_text and this constant, so the bulk
+# path reads the EIN through the identical code the monthly uses — no re-implementation to drift.
+EIN_PATH = "ReturnHeader.Filer.EIN"
+
+
+def _present(el, tag):
+    return el is not None and el.find(_tag(tag)) is not None
+
+
 # ── Schema ─────────────────────────────────────────────────────────────────
 SCHEMA_SQL = """
 -- Schedule I grants from 990 filers (public charities)
@@ -184,6 +194,7 @@ def parse_file(args):
         "return_type": return_type,
         "ein": None,
         "officers": [],
+        "contractors": [],
         "schedule_i": [],
         "related_orgs": [],
         "error": None,
@@ -192,11 +203,12 @@ def parse_file(args):
     try:
         tree = ET.parse(filepath, parser=_SAFE_PARSER)
         root = tree.getroot()
-        ein_val = find_text(root, "ReturnHeader.Filer.EIN")
+        ein_val = find_text(root, EIN_PATH)
         result["ein"] = ein_val
 
         if return_type == "990":
             _extract_990_officers(root, result)
+            _extract_contractors(root, result)
             _extract_schedule_i(root, result)
             _extract_schedule_r(root, result)
         elif return_type == "990EZ":
@@ -243,6 +255,9 @@ def _extract_990_officers(root, result):
             other_comp,  # other_compensation (Form 990 only)
             None,        # benefits (990-EZ/990-PF only — NULL for Form 990)
             None,        # expense_account (990-EZ/990-PF only — NULL for Form 990)
+            # §2: HCE flag read from ITS OWN box, independent of every other role *Ind —
+            # roles are check-all-that-apply; an `if officer then not HCE` inference is forbidden.
+            1 if _present(grp, "HighestCompensatedEmployeeInd") else 0,
         ))
 
 
@@ -280,6 +295,58 @@ def _extract_990ez_officers(root, result):
             None,      # other_compensation (Form 990 only — NULL for 990-EZ)
             benefits,  # benefits
             expense,   # expense_account
+            None,      # is_highest_compensated_employee (Form 990 only — NULL = not applicable, never 0)
+        ))
+
+
+def _contractor_name(grp):
+    """ContractorName WRAPPER -> PersonNm xor BusinessName(Line1[+Line2]). COALESCE both slots; 2-line
+    business name: dedupe L2==L1 then space-join (continuation). Identical logic to the proven port
+    (dev_extract_990_detail.py, re-triangulated against both oracles)."""
+    cn = grp.find(_tag("ContractorName"))
+    if cn is None:
+        return None
+    person = find_text(cn, "PersonNm")
+    if person is not None:
+        return person
+    biz = cn.find(_tag("BusinessName"))
+    if biz is None:
+        return None
+    l1 = find_text(biz, "BusinessNameLine1Txt")
+    l2 = find_text(biz, "BusinessNameLine2Txt")
+    if l2 and l2 != l1:
+        return f"{l1} {l2}" if l1 else l2
+    return l1
+
+
+def _contractor_addr(grp):
+    addr = grp.find(_tag("ContractorAddress"))
+    if addr is None:
+        return (None, None)
+    us = addr.find(_tag("USAddress"))
+    if us is not None:
+        return (find_text(us, "CityNm"), find_text(us, "StateAbbreviationCd"))
+    fr = addr.find(_tag("ForeignAddress"))
+    if fr is not None:
+        return (find_text(fr, "CityNm"), None)  # foreign state NULL by convention
+    return (None, None)
+
+
+def _extract_contractors(root, result):
+    """§2: Form 990 Part VII Sec B contractors. Appends (object_id, ein, contractor_name, city, state,
+    service_type, compensation) tuples. UNCONDITIONAL append — every ContractorCompensationGrp emits a
+    row regardless of name resolution (RAIL 1); group source = IRS990/ContractorCompensationGrp, not a
+    sibling repeating group (RAIL 2)."""
+    irs = root.find(f".//{_tag('IRS990')}")
+    if irs is None:
+        return
+    oid = result["object_id"]
+    ein = result.get("ein")
+    for g in irs.findall(_tag("ContractorCompensationGrp")):
+        city, state = _contractor_addr(g)
+        result["contractors"].append((
+            oid, ein, _contractor_name(g), city, state,
+            find_text(g, "ServicesDesc"), int_or_none(find_text(g, "CompensationAmt")),
         ))
 
 
@@ -458,8 +525,11 @@ def writer_process(db_path, result_queue, total_files,
     officer_buf = []
     sched_i_buf = []
     related_buf = []
+    contractor_buf = []
+    contractor_del_buf = []
     processed = 0
-    counts = {"officers": 0, "schedule_i": 0, "related_orgs": 0, "errors": 0}
+    counts = {"officers": 0, "schedule_i": 0, "related_orgs": 0, "contractors": 0,
+              "contractor_rows_deleted": 0, "errors": 0}
     t0 = time.time()
     last_log = 0
 
@@ -474,8 +544,16 @@ def writer_process(db_path, result_queue, total_files,
     OFFICER_SQL = """INSERT INTO officers
         (object_id, ein, person_name, title, avg_hours_per_week,
          reportable_comp_filing_org, reportable_comp_related_org, other_compensation,
-         benefits, expense_account)
-        VALUES (?,?,?,?,?,?,?,?,?,?)"""
+         benefits, expense_account, is_highest_compensated_employee)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)"""
+    # §2: contractors are per-oid DELETE-then-INSERT (idempotency contract, build packet §3/§6.2 —
+    # cleared 2026-06-26). NOT skip-set-gated: a zero-contractor filing is indistinguishable from an
+    # unprocessed one by presence, so presence-skipping would reprocess forever / append-only would
+    # double-insert on re-runs. A parse-error result neither deletes nor inserts.
+    CONTRACTOR_SQL = """INSERT INTO contractors
+        (object_id, ein, contractor_name, city, state, service_type, compensation)
+        VALUES (?,?,?,?,?,?,?)"""
+    CONTRACTOR_DEL_SQL = "DELETE FROM contractors WHERE object_id=?"
     SCHED_I_SQL = """INSERT INTO schedule_i_990
         (object_id, ein, recipient_name, recipient_ein,
          recipient_city, recipient_state, recipient_zip,
@@ -520,6 +598,14 @@ def writer_process(db_path, result_queue, total_files,
                 related_buf.extend(r["related_orgs"])
                 counts["related_orgs"] += len(r["related_orgs"])
 
+            # Contractors — DELETE-then-INSERT per parsed 990 (even when 0 rows: clears stale rows
+            # on a re-run); never on a parse error (a bad parse must not wipe existing rows).
+            if r["return_type"] == "990" and not r.get("error"):
+                contractor_del_buf.append((oid,))
+                if r.get("contractors"):
+                    contractor_buf.extend(r["contractors"])
+                    counts["contractors"] += len(r["contractors"])
+
         # Flush buffers
         if len(officer_buf) >= BATCH_INSERT_SIZE:
             con.executemany(OFFICER_SQL, officer_buf)
@@ -533,6 +619,15 @@ def writer_process(db_path, result_queue, total_files,
             con.executemany(RELATED_SQL, related_buf)
             con.commit()
             related_buf.clear()
+        if len(contractor_del_buf) >= BATCH_INSERT_SIZE or len(contractor_buf) >= BATCH_INSERT_SIZE:
+            # one commit covers delete+insert: a flush is atomic, an interrupted flush rolls back whole
+            pre_changes = con.total_changes
+            con.executemany(CONTRACTOR_DEL_SQL, contractor_del_buf)
+            counts["contractor_rows_deleted"] += con.total_changes - pre_changes
+            con.executemany(CONTRACTOR_SQL, contractor_buf)
+            con.commit()
+            contractor_del_buf.clear()
+            contractor_buf.clear()
 
         if processed - last_log >= LOG_INTERVAL:
             elapsed = time.time() - t0
@@ -544,6 +639,7 @@ def writer_process(db_path, result_queue, total_files,
                 f"officers: {counts['officers']:,} | "
                 f"sched_i: {counts['schedule_i']:,} | "
                 f"related: {counts['related_orgs']:,} | "
+                f"contractors: {counts['contractors']:,} ins/{counts['contractor_rows_deleted']:,} del | "
                 f"errors: {counts['errors']:,}"
             )
             last_log = processed
@@ -555,6 +651,11 @@ def writer_process(db_path, result_queue, total_files,
         con.executemany(SCHED_I_SQL, sched_i_buf)
     if related_buf:
         con.executemany(RELATED_SQL, related_buf)
+    if contractor_del_buf or contractor_buf:
+        pre_changes = con.total_changes
+        con.executemany(CONTRACTOR_DEL_SQL, contractor_del_buf)
+        counts["contractor_rows_deleted"] += con.total_changes - pre_changes
+        con.executemany(CONTRACTOR_SQL, contractor_buf)
     con.commit()
 
     elapsed = time.time() - t0
@@ -564,6 +665,9 @@ def writer_process(db_path, result_queue, total_files,
         f"officers: {counts['officers']:,} | "
         f"schedule_i: {counts['schedule_i']:,} | "
         f"related_orgs: {counts['related_orgs']:,} | "
+        f"contractors: {counts['contractors']:,} inserted / "
+        f"{counts['contractor_rows_deleted']:,} deleted "
+        f"(net {counts['contractors'] - counts['contractor_rows_deleted']:+,}) | "
         f"errors: {counts['errors']:,}"
     )
 
@@ -636,7 +740,7 @@ def _print_summary(db_path):
     con = sqlite3.connect(db_path)
     logging.info("─── 990/990EZ Detail Extraction Summary ───")
 
-    for table in ("officers", "schedule_i_990", "related_orgs"):
+    for table in ("officers", "schedule_i_990", "related_orgs", "contractors"):
         try:
             count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             logging.info(f"  {table}: {count:,} rows")
