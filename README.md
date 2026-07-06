@@ -14,7 +14,7 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 |-------|---------|-------------|
 | `returns` | 5,210,981 | 990/990-PF/990-EZ filings (tax years 2014–2025) |
 | `grants` | 13,609,220 | 990-PF grants paid, future grants, expenditure responsibility |
-| `officers` | 43,589,423 | Officers, directors, trustees, key employees |
+| `officers` | 44,521,930 | Officers, directors, trustees, key employees (+ six role flags, 2026-07) |
 | `schedule_i_990` | 6,393,046 | Schedule I grants (990/990-EZ filers) |
 | `schedule_i_grants` | 1,272,399 | DAF and intermediary grant disbursements |
 | `related_orgs` | 8,540,764 | Related organizations (Schedule R) |
@@ -23,7 +23,7 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 | `contributors` | 506,838 | Schedule B contributors (990-PF only) |
 | `program_activities` | 374,098 | 990/990-EZ program service descriptions |
 | `program_investments` | 211,210 | 990-PF program-related investments (Part IX-B) |
-| `contractors` | 69,108 | Top 5 independent contractors (990-PF only) |
+| `contractors` | 1,058,308 | Top 5 independent contractors (Form 990 + 990-PF, 2026-07) |
 | `top_employees` | 54,988 | Highest-compensated employees (990-PF only) |
 | `bmf` | 1,935,635 | IRS Business Master File (NTEE codes, subsection, status) |
 
@@ -111,8 +111,8 @@ See `schema.sql` for the full DDL. The 14 core tables are:
 - **`investments`** — 990-PF Part II investments (corporate bonds, government securities, land, other).
 - **`program_activities`** — 990/990-EZ program service accomplishments.
 - **`program_investments`** — 990-PF Part IX-B program-related investments.
-- **`contractors`** — Five highest-paid independent contractors by compensation. Currently parsed from **Form 990-PF only** (Part VIII); the Form 990 equivalent (Part VII Section B) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not "none reported."
-- **`top_employees`** — Highest-compensated employees (other than officers). Currently parsed from **Form 990-PF only** (Part VIII); the Form 990 equivalent (Part VII Section A) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not "none reported."
+- **`contractors`** — Five highest-paid independent contractors by compensation, parsed from **Form 990 AND 990-PF** filings (990 Part VII Section B live since 2026-07). An empty result means the filer reported no contractors above the $100K threshold.
+- **`top_employees`** — Highest-compensated employees (other than officers). Covers **Form 990-PF only by design**; Form-990 highest-compensated employees are not duplicated here — they appear in `officers` flagged `is_highest_compensated_employee=1`.
 
 ### Reference data
 - **`bmf`** — IRS Business Master File: NTEE codes, subsection, ruling dates, financial summary codes.
