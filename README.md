@@ -162,6 +162,8 @@ This repository mirrors the maintainer's working scripts. Synced files are byte-
 2. `from pathlib import Path` is added to the imports.
 3. `BASE_DIR = str(Path(__file__).resolve().parent.parent)` replaces the hard-coded local directory.
 
+Additionally, **`scripts/update.sh` and the two validation harnesses (`scripts/parser_harness.py`, `scripts/test_monthly_contractor_writer.py`) carry identity/infrastructure sanitization that must survive every sync**: server address → `user@YOUR_SERVER_IP`, backup bucket/remote → `your-b2-bucket`/`b2:`, the maintainer's home path → `$HOME`, provider names in comments genericized, and personal-name attributions in comments → "maintainer". The scripts are otherwise byte-identical to source.
+
 Any other divergence between this repo and the source scripts is drift, not convention, and should be closed by a sync PR.
 
 ---
