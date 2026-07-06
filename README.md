@@ -14,7 +14,7 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 |-------|---------|-------------|
 | `returns` | 5,210,981 | 990/990-PF/990-EZ filings (tax years 2014–2025) |
 | `grants` | 13,609,220 | 990-PF grants paid, future grants, expenditure responsibility |
-| `officers` | 43,589,423 | Officers, directors, trustees, key employees |
+| `officers` | 44,521,930 | Officers, directors, trustees, key employees (+ six role flags, 2026-07) |
 | `schedule_i_990` | 6,393,046 | Schedule I grants (990/990-EZ filers) |
 | `schedule_i_grants` | 1,272,399 | DAF and intermediary grant disbursements |
 | `related_orgs` | 8,540,764 | Related organizations (Schedule R) |
@@ -23,7 +23,7 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 | `contributors` | 506,838 | Schedule B contributors (990-PF only) |
 | `program_activities` | 374,098 | 990/990-EZ program service descriptions |
 | `program_investments` | 211,210 | 990-PF program-related investments (Part IX-B) |
-| `contractors` | 69,108 | Top 5 independent contractors (990-PF only) |
+| `contractors` | 1,058,308 | Top 5 independent contractors (Form 990 + 990-PF, 2026-07) |
 | `top_employees` | 54,988 | Highest-compensated employees (990-PF only) |
 | `bmf` | 1,935,635 | IRS Business Master File (NTEE codes, subsection, status) |
 
@@ -111,8 +111,8 @@ See `schema.sql` for the full DDL. The 14 core tables are:
 - **`investments`** — 990-PF Part II investments (corporate bonds, government securities, land, other).
 - **`program_activities`** — 990/990-EZ program service accomplishments.
 - **`program_investments`** — 990-PF Part IX-B program-related investments.
-- **`contractors`** — Five highest-paid independent contractors by compensation. Currently parsed from **Form 990-PF only** (Part VIII); the Form 990 equivalent (Part VII Section B) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not "none reported."
-- **`top_employees`** — Highest-compensated employees (other than officers). Currently parsed from **Form 990-PF only** (Part VIII); the Form 990 equivalent (Part VII Section A) is not yet parsed — an empty result for a Form 990 filer means not yet parsed, not "none reported."
+- **`contractors`** — Five highest-paid independent contractors by compensation, parsed from **Form 990 AND 990-PF** filings (990 Part VII Section B live since 2026-07). An empty result means the filer reported no contractors above the $100K threshold.
+- **`top_employees`** — Highest-compensated employees (other than officers). Covers **Form 990-PF only by design**; Form-990 highest-compensated employees are not duplicated here — they appear in `officers` flagged `is_highest_compensated_employee=1`.
 
 ### Reference data
 - **`bmf`** — IRS Business Master File: NTEE codes, subsection, ruling dates, financial summary codes.
@@ -162,7 +162,10 @@ This repository mirrors the maintainer's working scripts. Synced files are byte-
 2. `from pathlib import Path` is added to the imports.
 3. `BASE_DIR = str(Path(__file__).resolve().parent.parent)` replaces the hard-coded local directory.
 
-Additionally, **`scripts/update.sh` and the two validation harnesses (`scripts/parser_harness.py`, `scripts/test_monthly_contractor_writer.py`) carry identity/infrastructure sanitization that must survive every sync**: server address → `user@YOUR_SERVER_IP`, backup bucket/remote → `your-b2-bucket`/`b2:`, the maintainer's home path → `$HOME`, provider names in comments genericized, and personal-name attributions in comments → "maintainer". The scripts are otherwise byte-identical to source.
+Additionally, **`scripts/update.sh` and the two validation harnesses (`scripts/parser_harness.py`, `scripts/test_monthly_contractor_writer.py`) carry identity/infrastructure sanitization that must survive every sync**: server address → `user@YOUR_SERVER_IP`, backup bucket/remote → `your-b2-bucket`/`b2:`, the maintainer's home path → `$HOME`, provider names in comments genericized, and personal-name attributions in comments → "maintainer". The scripts are otherwise byte-identical to source, with two functional exceptions:
+
+- `scripts/test_monthly_contractor_writer.py` carries a `DATA_BASE` portability adaptation (same class as extract_990.py's `BASE_DIR`): its two pinned witness XMLs resolve to the IRS year dirs at the **repo root** (`{2019,2020}/download990xml_*/...`), one level above `scripts/`. Download those IRS batches before running it; verified green (11/11 proofs) in this layout.
+- `scripts/parser_harness.py`'s **baseline gate** (`python3 parser_harness.py <db>`, what update.sh invokes) is fully functional here. Its separate *promotion/witness* path reads `witness_fixtures_990.json`, a maintainer-side human-attestation record that is deliberately **not mirrored** (it attests who verified what; republishing it rewritten would blur exactly that provenance) — without it that path refuses loudly (fail-closed RED), which is the designed behavior, not a bug.
 
 Any other divergence between this repo and the source scripts is drift, not convention, and should be closed by a sync PR.
 
