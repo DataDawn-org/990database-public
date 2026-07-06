@@ -39,6 +39,12 @@ import importlib.util
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 LIVE_WRITER = os.path.join(BASE, "extract_990_detail.py")
+# PUBLIC-MIRROR PORTABILITY ADAPTATION (README "Mirror-sync conventions"): the pinned
+# witness XMLs live in the IRS year dirs at the REPO ROOT ({2019,2020}/...), one level
+# above scripts/. In the maintainer layout this file sits beside the year dirs, so
+# there DATA_BASE == BASE; here it is the parent. Same class as extract_990.py's
+# BASE_DIR adaptation — do not "correct" back.
+DATA_BASE = os.path.dirname(BASE)
 
 # Production DDL for the two tables writer_process assumes pre-exist
 # (captured verbatim from 990data.db 2026-07-05; create_schema() covers the other two).
@@ -349,7 +355,7 @@ def proof_p5(mod, scratch):
 # ── P6-P8 apparatus ─────────────────────────────────────────────────────────
 
 REGAN_OID = "201931349349304213"
-REGAN_XML = os.path.join(BASE, "2019", "download990xml_2019_6",
+REGAN_XML = os.path.join(DATA_BASE, "2019", "download990xml_2019_6",
                          "201931349349304213_public.xml")
 
 # Final-flush anchor (8-space indent = final flush; mid-run flush is deeper).
@@ -669,7 +675,7 @@ def proof_p7(mod, scratch):
 
 
 FOWLER_OID = "202013089349300746"
-FOWLER_XML = os.path.join(BASE, "2020", "download990xml_2020_3",
+FOWLER_XML = os.path.join(DATA_BASE, "2020", "download990xml_2020_3",
                           "202013089349300746_public.xml")
 
 

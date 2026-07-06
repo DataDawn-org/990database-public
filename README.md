@@ -162,7 +162,10 @@ This repository mirrors the maintainer's working scripts. Synced files are byte-
 2. `from pathlib import Path` is added to the imports.
 3. `BASE_DIR = str(Path(__file__).resolve().parent.parent)` replaces the hard-coded local directory.
 
-Additionally, **`scripts/update.sh` and the two validation harnesses (`scripts/parser_harness.py`, `scripts/test_monthly_contractor_writer.py`) carry identity/infrastructure sanitization that must survive every sync**: server address → `user@YOUR_SERVER_IP`, backup bucket/remote → `your-b2-bucket`/`b2:`, the maintainer's home path → `$HOME`, provider names in comments genericized, and personal-name attributions in comments → "maintainer". The scripts are otherwise byte-identical to source.
+Additionally, **`scripts/update.sh` and the two validation harnesses (`scripts/parser_harness.py`, `scripts/test_monthly_contractor_writer.py`) carry identity/infrastructure sanitization that must survive every sync**: server address → `user@YOUR_SERVER_IP`, backup bucket/remote → `your-b2-bucket`/`b2:`, the maintainer's home path → `$HOME`, provider names in comments genericized, and personal-name attributions in comments → "maintainer". The scripts are otherwise byte-identical to source, with two functional exceptions:
+
+- `scripts/test_monthly_contractor_writer.py` carries a `DATA_BASE` portability adaptation (same class as extract_990.py's `BASE_DIR`): its two pinned witness XMLs resolve to the IRS year dirs at the **repo root** (`{2019,2020}/download990xml_*/...`), one level above `scripts/`. Download those IRS batches before running it; verified green (11/11 proofs) in this layout.
+- `scripts/parser_harness.py`'s **baseline gate** (`python3 parser_harness.py <db>`, what update.sh invokes) is fully functional here. Its separate *promotion/witness* path reads `witness_fixtures_990.json`, a maintainer-side human-attestation record that is deliberately **not mirrored** (it attests who verified what; republishing it rewritten would blur exactly that provenance) — without it that path refuses loudly (fail-closed RED), which is the designed behavior, not a bug.
 
 Any other divergence between this repo and the source scripts is drift, not convention, and should be closed by a sync PR.
 
