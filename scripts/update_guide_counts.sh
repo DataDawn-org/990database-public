@@ -9,8 +9,7 @@
 #
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="/mnt/data/datadawn/990project"
 DB="$PROJECT_DIR/990data.db"
 GUIDE="$PROJECT_DIR/DATABASE_GUIDE.md"
 CLAUDE_MD="$PROJECT_DIR/CLAUDE.md"

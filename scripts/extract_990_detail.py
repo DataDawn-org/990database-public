@@ -220,6 +220,68 @@ def parse_file(args):
     return result
 
 
+def _officer_name(grp):
+    """§F person axis — the 3-slot carrier fallback PersonNm → BusinessName/BusinessNameLine1Txt
+    → PersonName, identical to instrument_officer_multiset.person_name (the same-measurement
+    function that adjudicated the swept corpus). The pre-B parser read only the first two slots;
+    aligned per R1–R3 rulings 2026-07-05 so the monthly writer and the re-derive cannot drift
+    on the person axis."""
+    name = find_text(grp, "PersonNm")
+    if name is None:
+        biz = grp.find(_tag("BusinessName"))
+        if biz is not None:
+            name = find_text(biz, "BusinessNameLine1Txt")
+    if name is None:
+        name = find_text(grp, "PersonName")
+    return name
+
+
+# ── §110/§F keyed dedup (Deliverable B; R1–R3 rulings 2026-07-05) ───────────
+# Key = person name + six role flags + six substantive fields + captured hours (R1:
+# avg_hours_per_week IS in the key), compared AFTER canonicalization (absent-vs-zero → 0,
+# text whitespace-run normalization). Singleton rows store the raw emission (no-change
+# witness pins stored==emitted); collapsed groups store the canonicalized values (an
+# absent-vs-zero pair stores 0). Tuple layout (16): (object_id, ein, name, title, hours,
+# comp_filing, comp_related, other_comp, benefits, expense_account, is_hce, is_officer,
+# is_individual_trustee, is_institutional_trustee, is_key_employee, is_former).
+
+def _canon_num(v):
+    return 0 if v is None else v
+
+
+def _canon_text(v):
+    return None if v is None else " ".join(str(v).split())
+
+
+def officer_key(t):
+    """Dedup key over one emitted officer tuple — excludes object_id/ein (constant per filing)."""
+    return (_canon_text(t[2]), _canon_text(t[3]),
+            tuple(_canon_num(t[i]) for i in (4, 5, 6, 7, 8, 9)),
+            t[10:16])
+
+
+def dedup_officers_keyed(rows):
+    """Collapse ONE filing's emitted officer tuples under the §110 going-forward key.
+    First-occurrence order preserved. NEVER applied across filings (amendments are
+    distinct object_ids)."""
+    groups, order = {}, []
+    for t in rows:
+        k = officer_key(t)
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(t)
+    out = []
+    for k in order:
+        g = groups[k]
+        if len(g) == 1:
+            out.append(g[0])          # singleton: raw emission, byte round-trip
+        else:
+            name, title, nums, flags = k
+            out.append((g[0][0], g[0][1], name, title) + nums + tuple(flags))
+    return out
+
+
 def _extract_990_officers(root, result):
     """Extract officers/directors from 990 Part VII Section A.
 
@@ -237,12 +299,7 @@ def _extract_990_officers(root, result):
     ein = result["ein"]
     oid = result["object_id"]
     for grp in irs.findall(_tag("Form990PartVIISectionAGrp")):
-        name = find_text(grp, "PersonNm")
-        if name is None:
-            # Try business name
-            biz = grp.find(_tag("BusinessName"))
-            if biz is not None:
-                name = find_text(biz, "BusinessNameLine1Txt")
+        name = _officer_name(grp)
         title = find_text(grp, "TitleTxt")
         hours = float_or_none(find_text(grp, "AverageHoursPerWeekRt"))
         comp = int_or_none(find_text(grp, "ReportableCompFromOrgAmt"))
@@ -255,9 +312,15 @@ def _extract_990_officers(root, result):
             other_comp,  # other_compensation (Form 990 only)
             None,        # benefits (990-EZ/990-PF only — NULL for Form 990)
             None,        # expense_account (990-EZ/990-PF only — NULL for Form 990)
-            # §2: HCE flag read from ITS OWN box, independent of every other role *Ind —
-            # roles are check-all-that-apply; an `if officer then not HCE` inference is forbidden.
+            # §2 + DECISION_role_flags_2026-06-26: every role flag read from ITS OWN box,
+            # check-all-that-apply — multi-role rows carry multiple 1s (Norris Fowler);
+            # any "if officer then not X" inference is forbidden.
             1 if _present(grp, "HighestCompensatedEmployeeInd") else 0,
+            1 if _present(grp, "OfficerInd") else 0,
+            1 if _present(grp, "IndividualTrusteeOrDirectorInd") else 0,
+            1 if _present(grp, "InstitutionalTrusteeInd") else 0,
+            1 if _present(grp, "KeyEmployeeInd") else 0,
+            1 if _present(grp, "FormerOfcrDirectorTrusteeInd") else 0,
         ))
 
 
@@ -278,11 +341,7 @@ def _extract_990ez_officers(root, result):
     ein = result["ein"]
     oid = result["object_id"]
     for grp in irs.findall(_tag("OfficerDirectorTrusteeEmplGrp")):
-        name = find_text(grp, "PersonNm")
-        if name is None:
-            biz = grp.find(_tag("BusinessName"))
-            if biz is not None:
-                name = find_text(biz, "BusinessNameLine1Txt")
+        name = _officer_name(grp)
         title = find_text(grp, "TitleTxt")
         hours = float_or_none(find_text(grp, "AverageHrsPerWkDevotedToPosRt"))
         comp = int_or_none(find_text(grp, "CompensationAmt"))
@@ -295,7 +354,10 @@ def _extract_990ez_officers(root, result):
             None,      # other_compensation (Form 990 only — NULL for 990-EZ)
             benefits,  # benefits
             expense,   # expense_account
-            None,      # is_highest_compensated_employee (Form 990 only — NULL = not applicable, never 0)
+            # Section-A role structure does not exist on 990-EZ → all six flags NULL
+            # (not-applicable, never 0) — manifest §B rule 3 / §D.
+            None,      # is_highest_compensated_employee
+            None, None, None, None, None,  # is_officer/indiv_trustee/inst_trustee/key_employee/former
         ))
 
 
@@ -544,8 +606,10 @@ def writer_process(db_path, result_queue, total_files,
     OFFICER_SQL = """INSERT INTO officers
         (object_id, ein, person_name, title, avg_hours_per_week,
          reportable_comp_filing_org, reportable_comp_related_org, other_compensation,
-         benefits, expense_account, is_highest_compensated_employee)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)"""
+         benefits, expense_account, is_highest_compensated_employee,
+         is_officer, is_individual_trustee, is_institutional_trustee,
+         is_key_employee, is_former)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
     # §2: contractors are per-oid DELETE-then-INSERT (idempotency contract, build packet §3/§6.2 —
     # cleared 2026-06-26). NOT skip-set-gated: a zero-contractor filing is indistinguishable from an
     # unprocessed one by presence, so presence-skipping would reprocess forever / append-only would
@@ -583,10 +647,13 @@ def writer_process(db_path, result_queue, total_files,
             if r.get("error"):
                 counts["errors"] += 1
 
-            # Officers (skip if already in DB)
+            # Officers (skip if already in DB). Going-forward clause (§110 / R1–R3
+            # rulings 2026-07-05): writes land under the keyed dedup, never the raw
+            # emission — otherwise raw dups re-accumulate every monthly (#265 conseq. 1).
             if oid not in skip_officers and r["officers"]:
-                officer_buf.extend(r["officers"])
-                counts["officers"] += len(r["officers"])
+                keyed = dedup_officers_keyed(r["officers"])
+                officer_buf.extend(keyed)
+                counts["officers"] += len(keyed)
 
             # Schedule I
             if oid not in skip_sched_i and r["schedule_i"]:
@@ -606,26 +673,26 @@ def writer_process(db_path, result_queue, total_files,
                     contractor_buf.extend(r["contractors"])
                     counts["contractors"] += len(r["contractors"])
 
-        # Flush buffers
-        if len(officer_buf) >= BATCH_INSERT_SIZE:
+        # Flush buffers — ALL tables under ONE commit whenever ANY buffer hits the
+        # threshold (#264 P9 cross-table fix): a filing committed in the legacy
+        # tables can then never be missing its contractor leg; an interrupted
+        # flush rolls back whole, across all four tables.
+        if (len(officer_buf) >= BATCH_INSERT_SIZE
+                or len(sched_i_buf) >= BATCH_INSERT_SIZE
+                or len(related_buf) >= BATCH_INSERT_SIZE
+                or len(contractor_del_buf) >= BATCH_INSERT_SIZE
+                or len(contractor_buf) >= BATCH_INSERT_SIZE):
             con.executemany(OFFICER_SQL, officer_buf)
-            con.commit()
-            officer_buf.clear()
-        if len(sched_i_buf) >= BATCH_INSERT_SIZE:
             con.executemany(SCHED_I_SQL, sched_i_buf)
-            con.commit()
-            sched_i_buf.clear()
-        if len(related_buf) >= BATCH_INSERT_SIZE:
             con.executemany(RELATED_SQL, related_buf)
-            con.commit()
-            related_buf.clear()
-        if len(contractor_del_buf) >= BATCH_INSERT_SIZE or len(contractor_buf) >= BATCH_INSERT_SIZE:
-            # one commit covers delete+insert: a flush is atomic, an interrupted flush rolls back whole
             pre_changes = con.total_changes
             con.executemany(CONTRACTOR_DEL_SQL, contractor_del_buf)
             counts["contractor_rows_deleted"] += con.total_changes - pre_changes
             con.executemany(CONTRACTOR_SQL, contractor_buf)
             con.commit()
+            officer_buf.clear()
+            sched_i_buf.clear()
+            related_buf.clear()
             contractor_del_buf.clear()
             contractor_buf.clear()
 
