@@ -88,7 +88,16 @@ CREATE TABLE officers (
     expense_account             INTEGER,
     reportable_comp_filing_org  INTEGER,
     reportable_comp_related_org INTEGER,
-    other_compensation          INTEGER
+    other_compensation          INTEGER,
+    -- Part VII Sec A role checkboxes (added 2026-07): check-all-that-apply, read
+    -- independently per box. Form 990 rows: 1/0 (0 = box unchecked). 990-EZ/PF
+    -- rows: all six NULL (no Section-A role structure on those forms).
+    is_highest_compensated_employee INTEGER,
+    is_officer                  INTEGER,
+    is_individual_trustee       INTEGER,
+    is_institutional_trustee    INTEGER,
+    is_key_employee             INTEGER,
+    is_former                   INTEGER
 );
 CREATE INDEX idx_officers_oid ON officers(object_id);
 CREATE INDEX idx_officers_ein ON officers(ein);

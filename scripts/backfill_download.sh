@@ -3,13 +3,12 @@
 # backfill_download.sh — Download and extract all missing IRS 990 XML batches
 #
 # Downloads from https://apps.irs.gov/pub/epostcard/990/xml/
-# Extracts XML files to ./{YEAR}/{BATCH}/
+# Extracts XML files to /mnt/data/datadawn/990project/{YEAR}/{BATCH}/
 # Marks completed batches in .extracted/
 #
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="/mnt/data/datadawn/990project"
 EXTRACTED_DIR="$PROJECT_DIR/.extracted"
 BASE_URL="https://apps.irs.gov/pub/epostcard/990/xml"
 LOG_FILE="$PROJECT_DIR/backfill_download.log"
@@ -42,7 +41,7 @@ download_and_extract() {
 
     # Download
     log "  Downloading $zip_name..."
-    if ! curl -# -L -o "$zip_path" "$url" 2>>"$LOG_FILE"; then
+    if ! curl -# -L -o "$zip_path" "$url" >>"$LOG_FILE" 2>&1; then
         log "  ERROR: Failed to download $url"
         rm -f "$zip_path"
         return 1
@@ -56,10 +55,14 @@ download_and_extract() {
         # Still try to extract
     fi
 
+    # Count what the ZIP claims to hold BEFORE we extract.
+    local declared_count
+    declared_count=$(unzip -l "$zip_path" 2>/dev/null | grep -cE '\.xml$' || echo 0)
+
     # Extract
     mkdir -p "$batch_dir"
     log "  Extracting to $batch_dir..."
-    if ! unzip -q -o "$zip_path" -d "$batch_dir" 2>>"$LOG_FILE"; then
+    if ! unzip -q -o "$zip_path" -d "$batch_dir" >>"$LOG_FILE" 2>&1; then
         log "  ERROR: Failed to extract $zip_path"
         return 1
     fi
@@ -69,7 +72,14 @@ download_and_extract() {
     xml_count=$(find "$batch_dir" -name '*.xml' -type f | wc -l)
     log "  Extracted $xml_count XML files"
 
-    # Clean up ZIP to save space
+    # Integrity check (same as update.sh download_batch): partial extracts
+    # would otherwise mark .done with missing files — DAF-incident class.
+    if [[ "$declared_count" -gt 0 && "$xml_count" -lt "$declared_count" ]]; then
+        log "  ERROR: extracted $xml_count XML files but ZIP declared $declared_count — partial extract, NOT marking complete"
+        return 1
+    fi
+
+    # Clean up ZIP to save space (last, AFTER integrity check)
     rm -f "$zip_path"
 
     # Mark as done
