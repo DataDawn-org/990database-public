@@ -12,7 +12,7 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 
 | Table | Records | Description |
 |-------|---------|-------------|
-| `returns` | 5,210,981 | 990/990-PF/990-EZ filings (tax years 2014–2025) |
+| `returns` | 5,429,970 | 990/990-PF/990-EZ/990-T filings (effectively complete TY2016–2025; TY2014–2015 partial and non-representative — see /api/coverage) |
 | `grants` | 13,609,220 | 990-PF grants paid, future grants, expenditure responsibility |
 | `officers` | 44,521,930 | Officers, directors, trustees, key employees (+ six role flags, 2026-07) |
 | `schedule_i_990` | 6,393,046 | Schedule I grants (990/990-EZ filers) |
