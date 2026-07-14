@@ -13,21 +13,21 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 | Table | Records | Description |
 |-------|---------|-------------|
 | `returns` | 5,595,912 | Every 990/990-PF/990-EZ/990-T e-file XML record the IRS has released — no gaps within that source. **Not** every nonprofit (see Known Limitation 2): the smallest orgs file Form 990-N and are not carried here; pre-2021 reflects e-file adoption, not sector growth. Per-year detail at /api/coverage |
-| `grants` | 13,609,220 | 990-PF grants paid, future grants, expenditure responsibility |
-| `officers` | 44,521,930 | Officers, directors, trustees, key employees (+ six role flags, 2026-07) |
-| `schedule_i_990` | 6,393,046 | Schedule I grants (990/990-EZ filers) |
-| `schedule_i_grants` | 1,272,399 | DAF and intermediary grant disbursements |
-| `related_orgs` | 8,540,764 | Related organizations (Schedule R) |
-| `capital_gains` | 15,580,627 | 990-PF capital gains/losses (Part IV) |
-| `investments` | 4,897,384 | 990-PF investments (Part II) |
-| `contributors` | 506,838 | Schedule B contributors (990-PF only) |
-| `program_activities` | 374,098 | 990/990-EZ program service descriptions |
-| `program_investments` | 211,210 | 990-PF program-related investments (Part IX-B) |
-| `contractors` | 1,058,308 | Top 5 independent contractors (Form 990 + 990-PF, 2026-07) |
-| `top_employees` | 54,988 | Highest-compensated employees (990-PF only) |
+| `grants` | 14,402,178 | 990-PF grants paid, future grants, expenditure responsibility |
+| `officers` | 45,772,456 | Officers, directors, trustees, key employees (+ six role flags, 2026-07) |
+| `schedule_i_990` | 7,243,504 | Schedule I grants (990/990-EZ filers) |
+| `schedule_i_grants` | 1,504,940 | DAF and intermediary grant disbursements |
+| `related_orgs` | 9,634,856 | Related organizations (Schedule R) |
+| `capital_gains` | 18,139,997 | 990-PF capital gains/losses (Part IV) |
+| `investments` | 5,334,190 | 990-PF investments (Part II) |
+| `contributors` | 534,603 | Schedule B contributors (990-PF only) |
+| `program_activities` | 399,569 | 990/990-EZ program service descriptions |
+| `program_investments` | 225,908 | 990-PF program-related investments (Part IX-B) |
+| `contractors` | 1,096,945 | Top 5 independent contractors (Form 990 + 990-PF, 2026-07) |
+| `top_employees` | 56,603 | Highest-compensated employees (990-PF only) |
 | `bmf` | 1,935,635 | IRS Business Master File (NTEE codes, subsection, status) |
 
-**Total**: ~102 million records across 14 tables.
+**Total**: ~112 million records across 14 tables.
 
 ---
 
@@ -137,7 +137,7 @@ All detail tables link to `returns` via `object_id` (the IRS-assigned filing ide
 
 5. **Opaque grantmaking** — Community foundations and DAFs often report grants with generic recipient names (e.g., "various charities") or aggregate amounts. Approximately 6,100 such records exist in the `schedule_i_grants` table.
 
-6. **Contributor records limited** — Only 506,838 contributor records exist because Schedule B data is only available for 990-PF filers. 990 and 990-EZ filers' Schedule B data is redacted in the public XML.
+6. **Contributor records limited** — Only 534,603 contributor records exist because Schedule B data is only available for 990-PF filers. 990 and 990-EZ filers' Schedule B data is redacted in the public XML.
 
 ---
 
