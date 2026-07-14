@@ -12,7 +12,7 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 
 | Table | Records | Description |
 |-------|---------|-------------|
-| `returns` | 5,429,970 | 990/990-PF/990-EZ/990-T filings (effectively complete TY2016–2025; TY2014–2015 partial and non-representative — see /api/coverage) |
+| `returns` | 5,595,912 | Every 990/990-PF/990-EZ/990-T e-file XML record the IRS has released — no gaps within that source. **Not** every nonprofit (see Known Limitation 2): the smallest orgs file Form 990-N and are not carried here; pre-2021 reflects e-file adoption, not sector growth. Per-year detail at /api/coverage |
 | `grants` | 13,609,220 | 990-PF grants paid, future grants, expenditure responsibility |
 | `officers` | 44,521,930 | Officers, directors, trustees, key employees (+ six role flags, 2026-07) |
 | `schedule_i_990` | 6,393,046 | Schedule I grants (990/990-EZ filers) |
@@ -127,17 +127,17 @@ All detail tables link to `returns` via `object_id` (the IRS-assigned filing ide
 
 1. **Filing lag** — IRS publishes e-filed returns with a delay. Tax year 2024 filings are still accumulating (~140K–180K pending as of early 2026). Tax year 2025 has very few filings.
 
-2. **E-file only** — Paper-filed returns are not included. E-filing became mandatory for most large nonprofits in 2020, but smaller organizations and some types still file on paper.
+2. **Coverage is stated relative to IRS-released electronic records — not the whole nonprofit sector.** This database holds every 990/990-EZ/990-PF/990-T e-file XML the IRS has released, with no gaps within that source. But two limits separate "every electronic record" from "every nonprofit":
+   - **The smallest organizations are never here.** Organizations with gross receipts of $50,000 or less meet their annual obligation with **Form 990-N**, an eight-field electronic postcard the IRS publishes separately and this database does not carry. At least **827,000** currently-filing organizations appear nowhere in this database, in any year — roughly the same size as the ~669,984 organizations held for tax year 2022. *Counting organizations:* this database sees roughly half the annually-filing exempt sector; don't use it for organization counts. *Analyzing money:* negligible — Form 990-N reports no financial data at all (no revenue, no expenses, no assets), and its filers are by definition under $50,000 in gross receipts. Every organization that reports financial detail to the IRS electronically is here.
+   - **Earlier years capture only the organizations that chose to e-file.** E-filing was voluntary until the Taxpayer First Act made it mandatory — Forms 990 and 990-PF from tax year 2020, Form 990-EZ from 2021. Before then the database holds a rising share of filers, skewed toward larger ones: in tax year 2016 roughly 71% of established filing organizations appear, versus ~87% of those above $10M in revenue. From tax year 2021 forward, coverage of organizations required to file a full return is essentially universal. Don't compute year-over-year trends across the pre-2021 span; the apparent 2016–2021 growth in filings is mostly e-filing adoption, not sector growth. (Paper-filed returns don't exist as e-file artifacts, so they can't be here.)
 
-3. **No 990-T** — IRS Form 990-T (Exempt Organization Business Income Tax Return) uses a different XML schema and is not extracted. Approximately 95,000 990-T filings are present in the raw XML but are skipped during parsing.
+3. **990-T is e-file-era only.** Form 990-T (Exempt Organization Business Income Tax Return) **is** carried — the database holds ~110,980 of them — but only from **tax year 2020 onward**, because the IRS did not offer 990-T e-filing before then (it became mandatory for tax years ending December 2020 and later). There are no 990-T records for TY2016–2019.
 
 4. **NTEE mismatch** — BMF NTEE codes are assigned at organization creation and rarely updated. Some organizations have outdated or incorrect NTEE codes that don't reflect their current activities.
 
 5. **Opaque grantmaking** — Community foundations and DAFs often report grants with generic recipient names (e.g., "various charities") or aggregate amounts. Approximately 6,100 such records exist in the `schedule_i_grants` table.
 
 6. **Contributor records limited** — Only 506,838 contributor records exist because Schedule B data is only available for 990-PF filers. 990 and 990-EZ filers' Schedule B data is redacted in the public XML.
-
-7. **2021 filing gap** — Tax year 2021 has approximately 34% fewer filings than adjacent years, likely due to IRS processing backlogs during that period.
 
 ---
 
