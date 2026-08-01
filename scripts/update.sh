@@ -1612,7 +1612,7 @@ PYCHECK
         "990data_public": {
             "tables": {
                 "contractors": {
-                    "description_html": "Five highest-paid independent contractors, parsed from <strong>Form 990 and 990-PF</strong> filings (Form 990 Part VII Section B; 990-PF Part VIII). An empty result means the filer reported no contractors above the $100K threshold."
+                    "description_html": "Five highest-paid independent contractors, parsed from <strong>Form 990 and 990-PF</strong> filings (Form 990 Part VII Section B; 990-PF Part VIII). An empty result means the filer reported no contractors above the \$100K threshold."
                 },
                 "top_employees": {
                     "description_html": "Highest-compensated employees (other than officers). This table covers Form 990-PF (Part VIII). Form-990 highest-compensated employees are not duplicated here — they appear in the <code>officers</code> table flagged <code>is_highest_compensated_employee</code>."
