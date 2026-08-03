@@ -69,6 +69,19 @@ jobs:
           if [ -n "${LEAK_PATTERN_LOCAL:-}" ]; then
             EFFECTIVE="${EFFECTIVE:+$EFFECTIVE|}$LEAK_PATTERN_LOCAL"
           fi
+          # FAIL-CLOSED ON AN UNEVALUATABLE PATTERN (queue #405, 2026-08-03).
+          # grep returns 2 on an INVALID regex, and `if grep ...; then` treats 2 as
+          # falsy — so a malformed pattern reads as CLEAN and blocks nothing. The
+          # union raised this risk by concatenating a pattern nobody can read: one
+          # trailing backslash or unbalanced bracket in the legacy secret silently
+          # disables the gate. Same class as a scanner that exits 0 when it cannot
+          # run. Probe the composed pattern against empty input: valid => rc 1,
+          # invalid => rc 2.
+          printf '' | grep -qE "$EFFECTIVE" 2>/dev/null
+          if [ $? -eq 2 ]; then
+            echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
+            exit 1
+          fi
           if echo "$added" | grep -qiE "$EFFECTIVE"; then
             # IMPORTANT: do not echo matched content. Actions logs are public
             # and forever-retained — printing the matched lines would re-leak
@@ -127,6 +140,24 @@ jobs:
           EFFECTIVE="$LEAK_PATTERN"
           if [ -n "${LEAK_PATTERN_LOCAL:-}" ]; then
             EFFECTIVE="${EFFECTIVE:+$EFFECTIVE|}$LEAK_PATTERN_LOCAL"
+          fi
+          # FAIL-CLOSED ON AN UNEVALUATABLE PATTERN (queue #405, 2026-08-03).
+          # grep returns 2 on an INVALID regex, and `if grep ...; then` treats 2 as
+          # falsy — so a malformed pattern reads as CLEAN and blocks nothing. The
+          # union raised this risk by concatenating a pattern nobody can read: one
+          # trailing backslash or unbalanced bracket in the legacy secret silently
+          # disables the gate. Same class as a scanner that exits 0 when it cannot
+          # run. Probe the composed pattern against empty input: valid => rc 1,
+          # invalid => rc 2.
+          printf '' | grep -qE "$EFFECTIVE" 2>/dev/null
+          if [ $? -eq 2 ]; then
+            echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
+            exit 1
+          fi
+          git grep -inE "$EFFECTIVE" -- . >/dev/null 2>&1; _gr=$?
+          if [ "$_gr" -eq 2 ]; then
+            echo "::error::Whole-tree scan could not evaluate the pattern (rc=2). Failing closed."
+            exit 1
           fi
           hits=$(git grep -inE "$EFFECTIVE" -- . 2>/dev/null | grep -viE "$ALLOW" || true)
           if [ -n "$hits" ]; then
