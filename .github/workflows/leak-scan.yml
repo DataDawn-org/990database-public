@@ -77,8 +77,12 @@ jobs:
           # disables the gate. Same class as a scanner that exits 0 when it cannot
           # run. Probe the composed pattern against empty input: valid => rc 1,
           # invalid => rc 2.
-          printf '' | grep -qE "$EFFECTIVE" 2>/dev/null
-          if [ $? -eq 2 ]; then
+          # NOTE: Actions `run:` blocks execute under `bash -e`, so a bare probe
+          # returning 1 (valid pattern, no match on empty input) would ABORT the
+          # step and block every PR. `|| _pv=$?` is what makes the probe survivable.
+          _pv=0
+          printf '' | grep -qE "$EFFECTIVE" 2>/dev/null || _pv=$?
+          if [ "$_pv" -eq 2 ]; then
             echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
             exit 1
           fi
@@ -149,12 +153,17 @@ jobs:
           # disables the gate. Same class as a scanner that exits 0 when it cannot
           # run. Probe the composed pattern against empty input: valid => rc 1,
           # invalid => rc 2.
-          printf '' | grep -qE "$EFFECTIVE" 2>/dev/null
-          if [ $? -eq 2 ]; then
+          # NOTE: Actions `run:` blocks execute under `bash -e`, so a bare probe
+          # returning 1 (valid pattern, no match on empty input) would ABORT the
+          # step and block every PR. `|| _pv=$?` is what makes the probe survivable.
+          _pv=0
+          printf '' | grep -qE "$EFFECTIVE" 2>/dev/null || _pv=$?
+          if [ "$_pv" -eq 2 ]; then
             echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
             exit 1
           fi
-          git grep -inE "$EFFECTIVE" -- . >/dev/null 2>&1; _gr=$?
+          _gr=0
+          git grep -inE "$EFFECTIVE" -- . >/dev/null 2>&1 || _gr=$?
           if [ "$_gr" -eq 2 ]; then
             echo "::error::Whole-tree scan could not evaluate the pattern (rc=2). Failing closed."
             exit 1
