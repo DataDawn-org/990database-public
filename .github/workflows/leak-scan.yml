@@ -41,6 +41,7 @@ jobs:
           # this file. Old commits in git history still contain the inline
           # pattern; that's accepted residual exposure (see incident_log.md).
           LEAK_PATTERN: ${{ secrets.LEAK_PATTERN }}
+          LEAK_PATTERN_LOCAL: ${{ secrets.LEAK_PATTERN_LOCAL }}
         run: |
           set -uo pipefail
           base="${{ github.event.pull_request.base.sha }}"
@@ -57,7 +58,18 @@ jobs:
           # (decision recorded 2026-05-12) and is stripped before scanning.
           added=$(git diff "$base..$head" --no-color | grep -E '^\+[^+]' || true)
 
-          if echo "$added" | grep -qiE "$LEAK_PATTERN"; then
+          # UNION (queue #405, 2026-08-03). LEAK_PATTERN is LEGACY-FROZEN: its value is
+          # unreadable, so REPLACING it could silently narrow coverage if it holds markers
+          # the local file lost. LEAK_PATTERN_LOCAL is the MAINTAINED one, set from
+          # leak-detection/identity_pattern.env. Scanning the UNION is monotonic: coverage
+          # is guaranteed to be a superset of the local pattern, whatever the legacy secret
+          # holds is retained, and nothing is ever silently removed. DO NOT retire
+          # LEAK_PATTERN -- retiring it reintroduces the exact unknowable this avoids.
+          EFFECTIVE="$LEAK_PATTERN"
+          if [ -n "${LEAK_PATTERN_LOCAL:-}" ]; then
+            EFFECTIVE="${EFFECTIVE:+$EFFECTIVE|}$LEAK_PATTERN_LOCAL"
+          fi
+          if echo "$added" | grep -qiE "$EFFECTIVE"; then
             # IMPORTANT: do not echo matched content. Actions logs are public
             # and forever-retained — printing the matched lines would re-leak
             # the exact content we're catching. Authors should run the scan
@@ -89,6 +101,7 @@ jobs:
       - name: Whole-tree scan for operator/identity leak markers
         env:
           LEAK_PATTERN: ${{ secrets.LEAK_PATTERN }}
+          LEAK_PATTERN_LOCAL: ${{ secrets.LEAK_PATTERN_LOCAL }}
         run: |
           set -uo pipefail
           if [ -z "$LEAK_PATTERN" ]; then
@@ -104,7 +117,18 @@ jobs:
           # Matches are held in a variable and NEVER echoed: Actions logs are
           # public and forever-retained — printing matches would re-leak the
           # exact content this job exists to catch.
-          hits=$(git grep -inE "$LEAK_PATTERN" -- . 2>/dev/null | grep -viE "$ALLOW" || true)
+          # UNION (queue #405, 2026-08-03). LEAK_PATTERN is LEGACY-FROZEN: its value is
+          # unreadable, so REPLACING it could silently narrow coverage if it holds markers
+          # the local file lost. LEAK_PATTERN_LOCAL is the MAINTAINED one, set from
+          # leak-detection/identity_pattern.env. Scanning the UNION is monotonic: coverage
+          # is guaranteed to be a superset of the local pattern, whatever the legacy secret
+          # holds is retained, and nothing is ever silently removed. DO NOT retire
+          # LEAK_PATTERN -- retiring it reintroduces the exact unknowable this avoids.
+          EFFECTIVE="$LEAK_PATTERN"
+          if [ -n "${LEAK_PATTERN_LOCAL:-}" ]; then
+            EFFECTIVE="${EFFECTIVE:+$EFFECTIVE|}$LEAK_PATTERN_LOCAL"
+          fi
+          hits=$(git grep -inE "$EFFECTIVE" -- . 2>/dev/null | grep -viE "$ALLOW" || true)
           if [ -n "$hits" ]; then
             nlines=$(printf '%s\n' "$hits" | wc -l)
             nfiles=$(printf '%s\n' "$hits" | cut -d: -f1 | sort -u | wc -l)
