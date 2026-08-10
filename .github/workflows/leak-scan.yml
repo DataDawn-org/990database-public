@@ -86,7 +86,34 @@ jobs:
           # publishes nothing and is not masked — but an overwrite or truncation of
           # either secret shows up here as a count drop on the very next run, for
           # EVERY class at once, which per-class canary rotation cannot cover.
-          echo "leak-pattern: deployed composed pattern carries $(printf '%s' "$EFFECTIVE" | tr '|' '\n' | wc -l) alternatives"
+          # CARDINALITY ASSERTION (queue #462 round 7) — this FAILS THE JOB, it does
+          # not merely print. An echo nobody compares to anything is not a guard.
+          #
+          # Composition is "frozen|local", so alternatives(composed) −
+          # alternatives(local) == alternatives(frozen), exactly. That difference is
+          # SELF-MAINTAINING: editing the local pattern moves both numbers equally
+          # and needs no pin bump, while a truncation, overwrite or loss of the
+          # unreadable frozen secret changes the residual and trips this on the very
+          # next run — for every class at once, which per-class canary rotation
+          # cannot do. A count is not content, so nothing here is published or masked.
+          #
+          # NOTE the trailing newline in printf: `wc -l` counts NEWLINES, so
+          # `printf '%s'` (no trailing newline) undercounts by exactly one. The first
+          # version of this shipped with that bug and reported 32 for a 33-alternative
+          # pattern, which made the frozen residual look like 8 when it is 9.
+          FROZEN_EXPECTED=9
+          if [ -z "${LEAK_PATTERN_LOCAL:-}" ]; then
+            echo "::error::LEAK_PATTERN_LOCAL is empty — cannot verify the frozen-pattern residual."
+            exit 1
+          fi
+          n_composed=$(printf '%s\n' "$EFFECTIVE" | tr '|' '\n' | wc -l)
+          n_local=$(printf '%s\n' "$LEAK_PATTERN_LOCAL" | tr '|' '\n' | wc -l)
+          residual=$(( n_composed - n_local ))
+          echo "leak-pattern: composed=$n_composed local=$n_local frozen-residual=$residual (expected $FROZEN_EXPECTED)"
+          if [ "$residual" -ne "$FROZEN_EXPECTED" ]; then
+            echo "::error::Frozen-pattern residual is $residual, expected $FROZEN_EXPECTED — LEAK_PATTERN has been truncated, overwritten or lost. Gate coverage may have silently narrowed."
+            exit 1
+          fi
           printf '' | grep -qE "$EFFECTIVE" 2>/dev/null || _pv=$?
           if [ "$_pv" -eq 2 ]; then
             echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
@@ -168,7 +195,34 @@ jobs:
           # publishes nothing and is not masked — but an overwrite or truncation of
           # either secret shows up here as a count drop on the very next run, for
           # EVERY class at once, which per-class canary rotation cannot cover.
-          echo "leak-pattern: deployed composed pattern carries $(printf '%s' "$EFFECTIVE" | tr '|' '\n' | wc -l) alternatives"
+          # CARDINALITY ASSERTION (queue #462 round 7) — this FAILS THE JOB, it does
+          # not merely print. An echo nobody compares to anything is not a guard.
+          #
+          # Composition is "frozen|local", so alternatives(composed) −
+          # alternatives(local) == alternatives(frozen), exactly. That difference is
+          # SELF-MAINTAINING: editing the local pattern moves both numbers equally
+          # and needs no pin bump, while a truncation, overwrite or loss of the
+          # unreadable frozen secret changes the residual and trips this on the very
+          # next run — for every class at once, which per-class canary rotation
+          # cannot do. A count is not content, so nothing here is published or masked.
+          #
+          # NOTE the trailing newline in printf: `wc -l` counts NEWLINES, so
+          # `printf '%s'` (no trailing newline) undercounts by exactly one. The first
+          # version of this shipped with that bug and reported 32 for a 33-alternative
+          # pattern, which made the frozen residual look like 8 when it is 9.
+          FROZEN_EXPECTED=9
+          if [ -z "${LEAK_PATTERN_LOCAL:-}" ]; then
+            echo "::error::LEAK_PATTERN_LOCAL is empty — cannot verify the frozen-pattern residual."
+            exit 1
+          fi
+          n_composed=$(printf '%s\n' "$EFFECTIVE" | tr '|' '\n' | wc -l)
+          n_local=$(printf '%s\n' "$LEAK_PATTERN_LOCAL" | tr '|' '\n' | wc -l)
+          residual=$(( n_composed - n_local ))
+          echo "leak-pattern: composed=$n_composed local=$n_local frozen-residual=$residual (expected $FROZEN_EXPECTED)"
+          if [ "$residual" -ne "$FROZEN_EXPECTED" ]; then
+            echo "::error::Frozen-pattern residual is $residual, expected $FROZEN_EXPECTED — LEAK_PATTERN has been truncated, overwritten or lost. Gate coverage may have silently narrowed."
+            exit 1
+          fi
           printf '' | grep -qE "$EFFECTIVE" 2>/dev/null || _pv=$?
           if [ "$_pv" -eq 2 ]; then
             echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
