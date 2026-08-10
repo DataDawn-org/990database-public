@@ -81,6 +81,12 @@ jobs:
           # returning 1 (valid pattern, no match on empty input) would ABORT the
           # step and block every PR. `|| _pv=$?` is what makes the probe survivable.
           _pv=0
+          # CARDINALITY, NOT CONTENT (queue #462). Echo how many alternatives the
+          # DEPLOYED composed pattern carries. A count is not a secret value, so it
+          # publishes nothing and is not masked — but an overwrite or truncation of
+          # either secret shows up here as a count drop on the very next run, for
+          # EVERY class at once, which per-class canary rotation cannot cover.
+          echo "leak-pattern: deployed composed pattern carries $(printf '%s' "$EFFECTIVE" | tr '|' '\n' | wc -l) alternatives"
           printf '' | grep -qE "$EFFECTIVE" 2>/dev/null || _pv=$?
           if [ "$_pv" -eq 2 ]; then
             echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
@@ -157,6 +163,12 @@ jobs:
           # returning 1 (valid pattern, no match on empty input) would ABORT the
           # step and block every PR. `|| _pv=$?` is what makes the probe survivable.
           _pv=0
+          # CARDINALITY, NOT CONTENT (queue #462). Echo how many alternatives the
+          # DEPLOYED composed pattern carries. A count is not a secret value, so it
+          # publishes nothing and is not masked — but an overwrite or truncation of
+          # either secret shows up here as a count drop on the very next run, for
+          # EVERY class at once, which per-class canary rotation cannot cover.
+          echo "leak-pattern: deployed composed pattern carries $(printf '%s' "$EFFECTIVE" | tr '|' '\n' | wc -l) alternatives"
           printf '' | grep -qE "$EFFECTIVE" 2>/dev/null || _pv=$?
           if [ "$_pv" -eq 2 ]; then
             echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
