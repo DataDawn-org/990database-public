@@ -25,7 +25,10 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 | `program_investments` | 225,908 | 990-PF program-related investments (Part IX-B) |
 | `contractors` | 1,096,945 | Top 5 independent contractors (Form 990 + 990-PF, 2026-07) |
 | `top_employees` | 56,603 | Highest-compensated employees (990-PF only) |
-| `bmf` | 1,935,635 | IRS Business Master File (NTEE codes, subsection, status) |
+| `bmf` | 1,957,340 | IRS Business Master File (NTEE codes, subsection, status) — IRS file as of 2026-09-05; vintage in `bmf_source_meta` |
+| `bmf_former` | 60,443 | Organizations in a previous IRS file and absent from the current one (last-known section/NTEE, `last_seen_asof`, `dropped_asof`) |
+| `returns_ntee_source` | 593,626 | Per-EIN provenance of `returns.ntee_code` (`bmf` = current file; `prior_bmf_kept` = org left the file, code kept from the earlier one) |
+| `bmf_source_meta` | 1 | Provenance of `bmf`: load time, as-of date, source-file manifest, row count, content hash |
 
 **Total**: ~112 million records across 14 tables.
 
