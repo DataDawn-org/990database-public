@@ -17,6 +17,8 @@ import sys
 import time
 from lxml import etree as ET
 
+from name_rules import join_name
+
 # XXE-hardened parser for IRS XML — disable external entities + network DTD lookup
 # (per-worker module-level constant; lxml XMLParser is process-safe after fork).
 _SAFE_PARSER = ET.XMLParser(resolve_entities=False, no_network=True)
@@ -360,10 +362,24 @@ def extract_address(el, us_tag="RecipientUSAddress", foreign_tag="RecipientForei
     return None, None, None, None
 
 
+def full_biz_name(biz):
+    """BusinessName container element -> Line1 [+ Line2] under the #306/#299
+    rule — ONE implementation, name_rules.join_name (see that module's header)."""
+    if biz is None:
+        return None
+    return join_name(find_text(biz, "BusinessNameLine1Txt"),
+                     find_text(biz, "BusinessNameLine2Txt"))
+
+
 def get_name(el, biz_tag="RecipientBusinessName", person_tag="RecipientPersonNm"):
-    """Get business name or person name from an element."""
+    """Get business name or person name from an element. Two-line business names
+    join under the full_biz_name contact-exclusion rule (pre-2026-07-11 this
+    concatenated unconditionally, so C/O/ATTN mailing lines leaked into
+    recipient names)."""
     if el is None:
         return None
+    # LEGACY EMISSION — phase-1 posture (DO-NOT #2): raw unconditional concat,
+    # exactly today's live behavior; the v2 rule applies at the flip only.
     biz = el.find(_tag(biz_tag))
     if biz is not None:
         line1 = find_text(biz, "BusinessNameLine1Txt")
@@ -375,6 +391,19 @@ def get_name(el, biz_tag="RecipientBusinessName", person_tag="RecipientPersonNm"
     if person is not None:
         return person.text
     return None
+
+
+def _pf_person_name(grp):
+    """#306 port of extract_990_detail._officer_name — the §F 3-slot person-axis
+    fallback (PersonNm → BusinessName via full_biz_name → PersonName), so PF
+    officer/top-employee rows are never served nameless when the filing names
+    the position holder in the business-name slot (trusts, corporate trustees)."""
+    name = find_text(grp, "PersonNm")
+    if name is None:
+        name = full_biz_name(grp.find(_tag("BusinessName")))
+    if name is None:
+        name = find_text(grp, "PersonName")
+    return name
 
 
 # ── Per-File Extraction ───────────────────────────────────────────────────
@@ -547,6 +576,10 @@ def parse_pf_file(oid, filepath):
                 ctype = None
                 biz = cg.find(_tag("ContributorBusinessName"))
                 if biz is not None:
+                    # SPLIT OUT of the #306/#299 build (maintainer 2026-07-11): the 05-22
+                    # dedup's natural key includes contributor_name and #309's
+                    # multiplicity fork adjudicates this exact grain — name emission
+                    # here stays Line1-only until that doctrine is ruled (rides #309).
                     cname = find_text(biz, "BusinessNameLine1Txt")
                     ctype = "business"
                 else:
@@ -895,6 +928,13 @@ def _flush_all(con, bufs, counts):
 
 # ── Main ──────────────────────────────────────────────────────────────────
 def main():
+    # Corpus write-lock seam gate (completeness spec §0.12): delegated under
+    # update.sh's lock via CORPUS_LOCK_TOKEN_990; standalone runs acquire
+    # (auto-release at exit); any other holder = hard stop, never a warning.
+    sys.path.insert(0, "/mnt/data/datadawn/tools")
+    from corpus_lock import gate as _corpus_gate
+    _corpus_gate("990", intent="extract_990pf_detail.py (PF details/capital_gains/investments)")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",

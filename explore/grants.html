@@ -506,7 +506,7 @@
             <div class="search-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             </div>
-            <input type="text" id="searchInput" placeholder="Search by recipient name, funder name, or EIN..." autofocus>
+            <input type="text" id="searchInput" placeholder="Search by recipient name, funder name, or funder EIN..." autofocus>
             <button class="search-btn" onclick="doSearch()">Search</button>
         </div>
         <div class="examples" id="examples">
@@ -687,8 +687,10 @@
                 ORDER BY amount DESC
                 LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
             `;
+            const countSql = `SELECT COUNT(*) AS cnt FROM grants WHERE ${where} ${filterW}`;
 
-            const rows = await query(sql);
+            const [rows, countRows] = await Promise.all([query(sql), query(countSql).catch(() => null)]);
+            const totalCount = countRows && countRows[0] ? countRows[0].cnt : null;
             const hasMore = rows.length > PAGE_SIZE;
             if (hasMore) rows.pop();
 
@@ -714,7 +716,8 @@
             let html = '';
             if (offset === 0) {
                 const qEnc = encodeURIComponent(q);
-                html += `<div class="status"><span class="count">${rows.length}${hasMore ? '+' : ''}</span> grants found${hasMore ? ` <a href="results.html?tab=grants&q=${qEnc}" style="margin-left:1rem;color:var(--dawn-amber);text-decoration:none;font-size:0.9rem">Explore all results &rarr;</a>` : ''}</div>`;
+                const countLabel = totalCount != null ? Number(totalCount).toLocaleString() : `${rows.length}${hasMore ? '+' : ''}`;
+                html += `<div class="status"><span class="count">${countLabel}</span> grants found${hasMore ? ` <a href="results.html?tab=grants&q=${qEnc}" style="margin-left:1rem;color:var(--dawn-amber);text-decoration:none;font-size:0.9rem">Explore all results &rarr;</a>` : ''}</div>`;
             }
 
             for (const r of rows) {
@@ -851,8 +854,8 @@
                 // Cross-links
                 html += '<div class="section-title">External Links</div>';
                 html += '<div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:0.5rem">';
-                html += `<a href="/990data_public/grants/${grantId}" target="_blank" class="doc-link">Raw Grant Record &rarr;</a>`;
-                html += `<a href="/990data_public/returns/${esc(g.object_id)}" target="_blank" class="doc-link">Raw 990-PF Filing &rarr;</a>`;
+                html += `<a href="/grant/${grantId}" target="_blank" class="doc-link">Full Grant Page &rarr;</a>`;
+                html += `<a href="/filing/${esc(g.object_id)}" target="_blank" class="doc-link">Full 990-PF Filing &rarr;</a>`;
                 html += `<a href="https://projects.propublica.org/nonprofits/organizations/${esc(g.ein)}" target="_blank" class="doc-link">ProPublica Nonprofit Explorer &rarr;</a>`;
                 html += '</div>';
 

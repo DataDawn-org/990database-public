@@ -359,11 +359,15 @@ REGAN_XML = os.path.join(DATA_BASE, "2019", "download990xml_2019_6",
                          "201931349349304213_public.xml")
 
 # Final-flush anchor (8-space indent = final flush; mid-run flush is deeper).
+# RE-PINNED 2026-07-19 (Band-1 port): the §B/§C final-flush block now sits
+# between the contractor INSERT and the single final commit — same commit
+# still covers the whole flush (the guarded atomicity property is unchanged);
+# the anchor tail moved from `con.commit()` to the band1 block head.
 FINAL_FLUSH_ANCHOR = ('        con.executemany(CONTRACTOR_SQL, contractor_buf)\n'
-                      '    con.commit()')
+                      '    if band1_del_buf:')
 COMMIT_SPLIT = ('        con.commit()  # COMMIT-SPLIT red variant (P8a): delete commits before insert\n'
                 '        con.executemany(CONTRACTOR_SQL, contractor_buf)\n'
-                '    con.commit()')
+                '    if band1_del_buf:')
 
 
 def make_commit_split_variant(scratch_dir):

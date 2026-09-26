@@ -1183,7 +1183,7 @@ LIMIT 25</textarea>
         function renderCharityGrantCard(r) {
             const total = (r.cash_grant_amt || 0) + (r.non_cash_amt || 0);
             return `
-                <a href="https://data.datadawn.org/990data_public/schedule_i_990/${r.id}" class="result-card-link" target="_blank">
+                <a href="https://data.datadawn.org/charity_grant/${r.id}" class="result-card-link" target="_blank">
                 <div class="result-card">
                     <div class="grant-flow">
                         <span class="from">${esc(r.funder_name || r.ein || 'Unknown')}</span>

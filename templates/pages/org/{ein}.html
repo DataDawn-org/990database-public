@@ -5,10 +5,15 @@
 {% block content %}
 
 {% set bmf_rows = sql("SELECT b.ein, b.name, b.city, b.state, b.zip, b.ntee_cd, b.subsection, b.ruling, b.foundation, b.asset_amt, b.income_amt FROM bmf b WHERE b.ein = :ein LIMIT 1", {"ein": ein}, database="990data_public") %}
+{# Dropped from the current IRS file (queue #431-#435 refresh, project-lead ruling 2026-09-05): keep the LAST-KNOWN subsection/NTEE from
+   bmf_former and say the org is no longer listed. Removal from the BMF (revocation/termination) is itself information. #}
+{% set former_rows = [] if bmf_rows else sql("SELECT f.ein, f.name, f.city, f.state, f.ntee_cd, f.subsection, f.ruling, f.foundation, f.status, f.last_seen_asof, f.dropped_asof FROM bmf_former f WHERE f.ein = :ein LIMIT 1", {"ein": ein}, database="990data_public") %}
 
 {% set filings = sql("SELECT r.object_id, r.ein, r.org_name, r.state, r.tax_year, r.tax_period_end, r.return_type, r.total_revenue, r.total_expenses, r.program_expenses, r.fundraising_expenses, r.management_expenses, r.total_assets_eoy, r.officer_comp, r.ntee_code, r.contributions_received, r.contributions_paid, r.fmv_assets_eoy, r.net_assets_eoy, r.qualifying_distributions FROM returns r WHERE r.ein = :ein ORDER BY r.tax_year DESC, r.object_id DESC", {"ein": ein}, database="990data_public") %}
 
-{% if not bmf_rows and not filings %}
+{% if not bmf_rows and not former_rows and not filings %}
+{# Not-found must carry a 404 status, else junk ids index as live pages (soft-404). #}
+{{ custom_status(404) }}
 
 <div class="not-found">
   <h1>Organization Not Found</h1>
@@ -18,16 +23,16 @@
 
 {% else %}
 
-{% set timeline = sql("SELECT sub.tax_year, sub.return_type, sub.total_revenue, sub.total_expenses, sub.program_expenses, sub.total_assets_eoy, sub.officer_comp, sub.object_id FROM (SELECT r.tax_year, r.return_type, r.total_revenue, r.total_expenses, r.program_expenses, r.total_assets_eoy, r.officer_comp, r.object_id, ROW_NUMBER() OVER (PARTITION BY r.tax_year ORDER BY r.object_id DESC) AS rn FROM returns r WHERE r.ein = :ein AND r.return_type IN ('990', '990EZ')) sub WHERE sub.rn = 1 ORDER BY sub.tax_year DESC", {"ein": ein}, database="990data_public") %}
+{% set timeline = sql("SELECT sub.tax_year, sub.return_type, sub.total_revenue, sub.total_expenses, sub.program_expenses, sub.total_assets_eoy, sub.officer_comp, sub.object_id FROM (SELECT r.tax_year, r.return_type, r.total_revenue, r.total_expenses, r.program_expenses, r.total_assets_eoy, r.officer_comp, r.object_id, ROW_NUMBER() OVER (PARTITION BY r.tax_year ORDER BY r.object_id DESC) AS rn FROM canonical_returns r WHERE r.ein = :ein AND r.return_type IN ('990', '990EZ')) sub WHERE sub.rn = 1 ORDER BY sub.tax_year DESC", {"ein": ein}, database="990data_public") %}
 
-{% set pf_timeline = sql("SELECT sub.tax_year, sub.total_revenue, sub.total_expenses, sub.contributions_received, sub.contributions_paid, sub.fmv_assets_eoy, sub.net_assets_eoy, sub.qualifying_distributions, sub.total_assets_eoy, sub.object_id FROM (SELECT r.tax_year, r.total_revenue, r.total_expenses, r.contributions_received, r.contributions_paid, r.fmv_assets_eoy, r.net_assets_eoy, r.qualifying_distributions, r.total_assets_eoy, r.object_id, ROW_NUMBER() OVER (PARTITION BY r.tax_year ORDER BY r.object_id DESC) AS rn FROM returns r WHERE r.ein = :ein AND r.return_type = '990PF') sub WHERE sub.rn = 1 ORDER BY sub.tax_year DESC", {"ein": ein}, database="990data_public") %}
+{% set pf_timeline = sql("SELECT sub.tax_year, sub.total_revenue, sub.total_expenses, sub.contributions_received, sub.contributions_paid, sub.fmv_assets_eoy, sub.net_assets_eoy, sub.qualifying_distributions, sub.total_assets_eoy, sub.object_id FROM (SELECT r.tax_year, r.total_revenue, r.total_expenses, r.contributions_received, r.contributions_paid, r.fmv_assets_eoy, r.net_assets_eoy, r.qualifying_distributions, r.total_assets_eoy, r.object_id, ROW_NUMBER() OVER (PARTITION BY r.tax_year ORDER BY r.object_id DESC) AS rn FROM canonical_returns r WHERE r.ein = :ein AND r.return_type = '990PF') sub WHERE sub.rn = 1 ORDER BY sub.tax_year DESC", {"ein": ein}, database="990data_public") %}
 
-{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.reportable_comp_filing_org, (COALESCE(o.reportable_comp_related_org, 0) + COALESCE(o.other_compensation, 0) + COALESCE(o.benefits, 0) + COALESCE(o.expense_account, 0)) AS other_comp FROM officers o WHERE o.object_id = (SELECT r.object_id FROM returns r WHERE r.ein = :ein ORDER BY r.tax_year DESC, r.object_id DESC LIMIT 1) ORDER BY o.reportable_comp_filing_org DESC LIMIT 25", {"ein": ein}, database="990data_public") %}
+{% set officers = sql("SELECT o.person_name, o.title, o.avg_hours_per_week, o.reportable_comp_filing_org, (COALESCE(o.reportable_comp_related_org, 0) + COALESCE(o.other_compensation, 0) + COALESCE(o.benefits, 0) + COALESCE(o.expense_account, 0)) AS other_comp FROM officers o WHERE o.object_id = (SELECT r.object_id FROM canonical_returns r WHERE r.ein = :ein ORDER BY r.tax_year DESC, r.object_id DESC LIMIT 1) ORDER BY o.reportable_comp_filing_org DESC LIMIT 25", {"ein": ein}, database="990data_public") %}
 
 {% set grants_made = sql("SELECT g.id, g.recipient_name, g.recipient_city, g.recipient_state, g.amount, g.purpose, g.grant_date, g.grant_type, r2.tax_year FROM grants g LEFT JOIN returns r2 ON r2.object_id = g.object_id WHERE g.ein = :ein AND g.grant_type = 'paid' ORDER BY g.amount DESC LIMIT 100", {"ein": ein}, database="990data_public") %}
 
-{% set org_name_for_match = bmf_rows[0]["name"] if bmf_rows else filings[0]["org_name"] %}
-{% set org_state_match = (bmf_rows[0]["state"] if bmf_rows else (filings[0]["state"] if filings else "")) or "" %}
+{% set org_name_for_match = bmf_rows[0]["name"] if bmf_rows else (former_rows[0]["name"] if former_rows else (filings[0]["org_name"] if filings else "")) %}
+{% set org_state_match = (bmf_rows[0]["state"] if bmf_rows else (former_rows[0]["state"] if former_rows else (filings[0]["state"] if filings else ""))) or "" %}
 {# `grants` (990-PF Part XV) carries a recipient NAME but NO recipient EIN, so incoming private-foundation grants can
    only be matched to this org by name. RESOLVE-OR-DISCLOSE (methodology §3c): attribute a name-matched list to THIS
    org ONLY when its exact name is globally UNIQUE in the IRS BMF (no other registered org can own those grants). When
@@ -53,9 +58,15 @@
 
 {% set related = sql("SELECT DISTINCT ro.related_org_name, ro.related_ein, ro.city, ro.state, ro.primary_activity, ro.section, ro.exempt_code_section FROM related_orgs ro WHERE ro.ein = :ein LIMIT 30", {"ein": ein}, database="990data_public") %}
 
-{% set org_name = bmf_rows[0]["name"] if bmf_rows else (filings[0]["org_name"] if filings else "Unknown Organization") %}
-{% set org_state = bmf_rows[0]["state"] if bmf_rows else (filings[0]["state"] if filings else "") %}
-{% set org_ntee = bmf_rows[0]["ntee_cd"] if bmf_rows else "" %}
+{# Conditional-prominence signal (#289/#291 follow-on): true only when grants-received is DISPLAYABLE data —
+   EIN-exact Schedule I OR a globally-unique name match. Shared-name DISCLOSE (can't-attribute) is NOT "present".
+   Empty already collapses via each section's own if-gate, so this drives emphasis, not visibility. #}
+{% set gr_present = (grants_received|length > 0) or (org_name_unique and pf_grants_received|length > 0) %}
+
+{% set org_name = bmf_rows[0]["name"] if bmf_rows else (former_rows[0]["name"] if former_rows else (filings[0]["org_name"] if filings else "Unknown Organization")) %}
+{% set org_state = bmf_rows[0]["state"] if bmf_rows else (former_rows[0]["state"] if former_rows else (filings[0]["state"] if filings else "")) %}
+{% set org_ntee = bmf_rows[0]["ntee_cd"] if bmf_rows else (former_rows[0]["ntee_cd"] if former_rows else "") %}
+{% set org_subsection = bmf_rows[0]["subsection"] if bmf_rows else (former_rows[0]["subsection"] if former_rows else "") %}
 
 <div class="page-header">
   <h1>{{ org_name }}</h1>
@@ -75,10 +86,16 @@
       {{ org_ntee }}
     </div>
     {% endif %}
-    {% if bmf_rows and bmf_rows[0]["subsection"] %}
+    {% if org_subsection %}
     <div class="meta-item">
-      <div class="meta-label">IRC Section</div>
-      501(c)({{ bmf_rows[0]["subsection"] }})
+      <div class="meta-label">IRC Section{% if former_rows %} (last listed){% endif %}</div>
+      501(c)({{ (org_subsection|string).lstrip('0') or org_subsection }})
+    </div>
+    {% endif %}
+    {% if former_rows %}
+    <div class="meta-item">
+      <div class="meta-label">IRS Business Master File</div>
+      Not in the current IRS file (as of {{ former_rows[0]["dropped_asof"] }}); last listed {{ former_rows[0]["last_seen_asof"] }}. Removal usually means revocation or termination of exempt status.
     </div>
     {% endif %}
     {% if filings %}
@@ -262,7 +279,7 @@
 {% if org_name_unique and pf_grants_received %}
 {# RESOLVE: the exact name is globally unique in the BMF, so a name match can only be this org (modulo variant
    spellings) — show it as a verify-lead, NO aggregate total asserted. #}
-<div class="section">
+<div class="section" style="border-left:3px solid var(--dawn-amber);padding-left:1rem;">
   <h2 class="section-title">Foundation Grants Received <span style="font-weight:400;color:var(--text-muted);font-size:0.65em;white-space:nowrap;">matched by name</span></h2>
   <p style="color:var(--text-muted);font-size:0.85rem;margin-top:-0.5rem;">Private-foundation grants naming this organization as recipient. Grant records carry no recipient EIN, so these are matched on name; this exact name is unique in the IRS registry, but the list may still omit grants filed under a variant spelling. <em>Treat as a lead and verify against the source filing before citing.</em> (The Schedule I section below is matched by EIN and is exact.)</p>
   <div class="table-wrap">
@@ -306,7 +323,7 @@
 {% endif %}
 
 {% if grants_received %}
-<div class="section">
+<div class="section" style="border-left:3px solid var(--dawn-amber);padding-left:1rem;">
   <h2 class="section-title">Schedule I Grants Received (Top 50)</h2>
   <div class="table-wrap">
   <table class="data-table">

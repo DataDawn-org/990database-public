@@ -452,6 +452,10 @@
                 stateCol: 'recipient_state',
                 yearCol: 'tax_year',
                 backUrl: '/explore/grants.html',
+                // grants has NO recipient_ein column (CLAUDE.md 990 gotcha #1) — an EIN query here
+                // can only mean the FUNDER. The other grant tabs match recipient_ein too (B1/B2,
+                // working-docs/search_audit_2026-07-22.md).
+                einCols: ['ein'],
                 columns: 'id, object_id, ein, grant_type, recipient_name, recipient_city, recipient_state, amount, tax_year',
             },
             daf: {
@@ -463,7 +467,8 @@
                 stateCol: 'recipient_state',
                 yearCol: 'tax_year',
                 backUrl: '/explore/daf.html',
-                columns: 'id, funder_ein, funder_name, tax_year, grant_type, recipient_name, recipient_city, recipient_state, amount',
+                einCols: ['funder_ein', 'recipient_ein'],
+                columns: 'id, funder_ein, funder_name, tax_year, grant_type, recipient_name, recipient_ein, recipient_city, recipient_state, amount',
             },
             charity: {
                 label: 'Public Charity Grants',
@@ -474,6 +479,7 @@
                 stateCol: 'recipient_state',
                 yearCol: null,
                 backUrl: '/explore/grants.html',
+                einCols: ['ein', 'recipient_ein'],
                 columns: 'id, object_id, ein, recipient_name, recipient_ein, recipient_city, recipient_state, cash_grant_amt, purpose',
             },
             orgs: {
@@ -485,7 +491,15 @@
                 stateCol: 'state',
                 yearCol: 'tax_year',
                 backUrl: '/explore/990.html',
-                columns: 'object_id, ein, return_type, org_name, state, tax_year, total_revenue, total_expenses, total_assets_eoy',
+                // Dedup to one row per org (its latest 990/EZ/PF — MAX(tax_year) makes the bare columns
+                // follow the latest filing) so the default size sort isn't fooled by 990 filing lag: a
+                // fresh 2025 return would otherwise outrank a larger org whose latest on file is 2024.
+                // Excludes 990-T (UBI-only revenue distorts the size ranking — CLAUDE.md 990 gotcha #2).
+                // Mirrors datadawn-website/explore.html's orgs default so the two surfaces agree.
+                groupBy: 'ein',
+                extraWhere: "AND return_type IN ('990','990EZ','990PF')",
+                einCols: ['ein'],
+                columns: 'object_id, ein, return_type, org_name, state, MAX(tax_year) AS tax_year, total_revenue, total_expenses, total_assets_eoy',
             },
         };
 
@@ -493,7 +507,9 @@
         function buildSearchWhere(cfg, q) {
             const einClean = q.replace(/[^0-9]/g, '');
             if (/^\d{9}$/.test(einClean) && q.replace(/[-\s]/g, '').length <= 10) {
-                return `ein = '${einClean}'`;
+                // Per-tab EIN columns: the old hardcoded `ein = …` hit the FUNDER on grant tabs and
+                // a nonexistent column on daf (SQL error → silent empty). B1/B2 fix.
+                return '(' + cfg.einCols.map(c => `${c} = '${einClean}'`).join(' OR ') + ')';
             }
             const ftsQ = sanitizeFTS(q);
             if (ftsQ) {
@@ -675,11 +691,17 @@
                 const searchW = buildSearchWhere(cfg, currentQuery);
                 const filterW = buildFilterWhere(cfg);
                 const orderBy = buildOrderBy(cfg);
+                const extraW = cfg.extraWhere || '';
+                const groupByClause = cfg.groupBy ? `GROUP BY ${cfg.groupBy}` : '';
                 const offset = (currentPage - 1) * PAGE_SIZE;
 
                 // Count query (parallel) — count directly on FTS table when no extra filters
                 let countSql;
-                if (!filterW.trim() && searchW.includes('MATCH')) {
+                if (cfg.groupBy) {
+                    // Deduped tab (orgs): count distinct groups, honoring the type filter. The FTS-row
+                    // shortcut would over-count here (one row per filing, not per org).
+                    countSql = `SELECT COUNT(DISTINCT ${cfg.groupBy}) as cnt FROM ${cfg.table} WHERE ${searchW} ${filterW} ${extraW}`;
+                } else if (!filterW.trim() && searchW.includes('MATCH')) {
                     // Extract FTS match clause and count directly on FTS table (avoids materializing full result set)
                     const ftsQ = sanitizeFTS(currentQuery);
                     countSql = `SELECT COUNT(*) as cnt FROM ${cfg.fts} WHERE ${cfg.fts} MATCH '${sqlEsc(ftsQ)}'`;
@@ -689,7 +711,7 @@
                 const countP = query(countSql);
 
                 // Data query
-                const dataSql = `SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${searchW} ${filterW} ${orderBy} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+                const dataSql = `SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${searchW} ${filterW} ${extraW} ${groupByClause} ${orderBy} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
                 const [countRows, rows] = await Promise.all([countP, query(dataSql)]);
 
                 totalCount = countRows[0]?.cnt || 0;
@@ -745,7 +767,7 @@
                 renderPagination(totalCount);
 
                 // CSV link
-                const csvSql = `SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${searchW} ${filterW} ${orderBy} LIMIT 10000`;
+                const csvSql = `SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${searchW} ${filterW} ${extraW} ${groupByClause} ${orderBy} LIMIT 10000`;
                 document.getElementById('csvLink').href = `${API}.csv?sql=${encodeURIComponent(csvSql)}`;
 
             } catch (e) {
@@ -754,11 +776,13 @@
                     const fallbackW = `${cfg.nameCol} LIKE '%${sqlEsc(currentQuery)}%'`;
                     const filterW = buildFilterWhere(cfg);
                     const orderBy = buildOrderBy(cfg);
+                    const extraW = cfg.extraWhere || '';
+                    const groupByClause = cfg.groupBy ? `GROUP BY ${cfg.groupBy}` : '';
                     const offset = (currentPage - 1) * PAGE_SIZE;
 
                     const [countRows, rows] = await Promise.all([
-                        query(`SELECT COUNT(*) as cnt FROM ${cfg.table} WHERE ${fallbackW} ${filterW}`),
-                        query(`SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${fallbackW} ${filterW} ${orderBy} LIMIT ${PAGE_SIZE} OFFSET ${offset}`)
+                        query(cfg.groupBy ? `SELECT COUNT(DISTINCT ${cfg.groupBy}) as cnt FROM ${cfg.table} WHERE ${fallbackW} ${filterW} ${extraW}` : `SELECT COUNT(*) as cnt FROM ${cfg.table} WHERE ${fallbackW} ${filterW}`),
+                        query(`SELECT ${cfg.columns} FROM ${cfg.table} WHERE ${fallbackW} ${filterW} ${extraW} ${groupByClause} ${orderBy} LIMIT ${PAGE_SIZE} OFFSET ${offset}`)
                     ]);
                     totalCount = countRows[0]?.cnt || 0;
                     document.getElementById('topCount').innerHTML = `<span>${fmt(totalCount)}</span> results`;
@@ -839,7 +863,7 @@
                 html += `<div class="detail-item"><div class="label">Funder</div><div class="value">${esc(g.funder_name || 'Unknown')}</div></div>`;
                 html += `<div class="detail-item"><div class="label">EIN</div><div class="value">${esc(g.ein)}</div></div>`;
                 html += '</div>';
-                html += `<div style="margin-top:1rem"><a href="/990data_public/grants/${grantId}" target="_blank" class="doc-link">Raw Record &rarr;</a></div>`;
+                html += `<div style="margin-top:1rem"><a href="/grant/${grantId}" target="_blank" class="doc-link">Full Detail Page &rarr;</a></div>`;
                 document.getElementById('detailContent').innerHTML = html;
             } catch (e) {
                 document.getElementById('detailContent').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
@@ -866,7 +890,7 @@
                 if (g.purpose) html += `<div class="detail-item" style="grid-column:span 2"><div class="label">Purpose</div><div class="value">${esc(g.purpose)}</div></div>`;
                 html += '</div>';
                 html += `<div class="detail-item"><div class="label">Funder EIN</div><div class="value">${esc(g.funder_ein)}</div></div>`;
-                html += `<div style="margin-top:1rem"><a href="/990data_public/schedule_i_grants/${grantId}" target="_blank" class="doc-link">Raw Record &rarr;</a></div>`;
+                html += `<div style="margin-top:1rem"><a href="/daf/${grantId}" target="_blank" class="doc-link">Full Detail Page &rarr;</a></div>`;
                 document.getElementById('detailContent').innerHTML = html;
             } catch (e) {
                 document.getElementById('detailContent').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
@@ -903,7 +927,7 @@
                     html += `<div class="detail-item"><div class="label">Recipient EIN</div><div class="value">${esc(g.recipient_ein)}</div></div>`;
                     html += '</div>';
                 }
-                html += `<div style="margin-top:1rem"><a href="/990data_public/schedule_i_990/${grantId}" target="_blank" class="doc-link">Raw Record &rarr;</a></div>`;
+                html += `<div style="margin-top:1rem"><a href="/charity_grant/${grantId}" target="_blank" class="doc-link">Full Detail Page &rarr;</a></div>`;
                 document.getElementById('detailContent').innerHTML = html;
             } catch (e) {
                 document.getElementById('detailContent').innerHTML = `<div class="status">Error: ${esc(e.message)}</div>`;
@@ -931,7 +955,7 @@
                 html += '<div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:0.5rem">';
                 html += `<a href="/explore/grants.html?q=${encodeURIComponent(r.ein)}" class="doc-link">Grants &rarr;</a>`;
                 html += `<a href="/explore/bmf.html?q=${encodeURIComponent(r.ein)}&detail=${encodeURIComponent(r.ein)}" class="doc-link">BMF &rarr;</a>`;
-                html += `<a href="/990data_public/returns/${esc(r.object_id)}" target="_blank" class="doc-link">Raw Record &rarr;</a>`;
+                html += `<a href="/filing/${esc(r.object_id)}" target="_blank" class="doc-link">Full Filing Page &rarr;</a>`;
                 html += '</div>';
                 document.getElementById('detailContent').innerHTML = html;
             } catch (e) {
@@ -956,7 +980,7 @@
         (function init() {
             currentTab = getParam('tab') || 'grants';
             currentQuery = getParam('q') || '';
-            currentSort = getParam('sort') || (currentTab === 'orgs' ? 'year_desc' : 'amount_desc');
+            currentSort = getParam('sort') || 'amount_desc'; // orgs default now = size (revenue DESC, deduped) — was 'year_desc'; year-first buried larger orgs behind fresh small filings (990 lag). See TAB_CONFIG.orgs.
             currentPage = parseInt(getParam('page')) || 1;
 
             const cfg = TAB_CONFIG[currentTab];

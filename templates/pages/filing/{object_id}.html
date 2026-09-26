@@ -7,6 +7,8 @@
 {% set filing = sql("SELECT r.object_id, r.ein, r.org_name, r.state, r.tax_year, r.tax_period_end, r.return_type, r.total_revenue, r.total_expenses, r.program_expenses, r.fundraising_expenses, r.management_expenses, r.total_assets_eoy, r.officer_comp, r.contributions_received, r.contributions_paid, r.fmv_assets_eoy, r.net_assets_eoy, r.qualifying_distributions, r.distributable_amount FROM returns r WHERE r.object_id = :object_id LIMIT 1", {"object_id": object_id}, database="990data_public") %}
 
 {% if not filing %}
+{# Not-found must carry a 404 status, else junk ids index as live pages (soft-404). #}
+{{ custom_status(404) }}
 
 <div class="not-found">
   <h1>Filing Not Found</h1>
@@ -394,13 +396,12 @@
 </div>
 {% endif %}
 
-{# Parser-coverage disclosure (2026-06-05): top_employees/contractors are
-   parsed from Form 990-PF only. On non-PF filings the two sections above
-   never render — without this note, their absence reads as "reported none"
-   when comparing against a PF filing. Remove when the Form 990 parsers
-   (Bug #1/#2) ship. #}
+{# Coverage note (2026-07-03, Deliverable A land): contractors are parsed from Form 990 and
+   990-PF filings — an empty contractors section now means none reported above the $100K
+   threshold. top_employees covers Form 990-PF; Form-990 highest-compensated employees appear
+   in the officers table flagged is_highest_compensated_employee. #}
 {% if not is_pf %}
-<p style="color:var(--text-muted);font-size:0.85rem;">Highest-compensated employee and independent-contractor details are currently parsed from Form 990-PF filings only &mdash; this {{ f["return_type"] }} filing&rsquo;s equivalents are not yet parsed. Their absence on this page does not mean none were reported.</p>
+<p style="color:var(--text-muted);font-size:0.85rem;">Independent contractors are parsed from Form 990 and 990-PF filings &mdash; an empty contractors section means none were reported above the $100K threshold. Highest-compensated employees for this {{ f["return_type"] }} filing appear in the Officers &amp; Key Personnel section above (flagged <code>is_highest_compensated_employee</code> in the underlying <a href="https://data.datadawn.org/990data_public/officers">officers table</a>), not in a separate table.</p>
 {% endif %}
 
 {% set prog_acts = sql("SELECT pa.activity_num, pa.description, pa.expenses FROM program_activities pa WHERE pa.object_id = :object_id ORDER BY pa.activity_num", {"object_id": object_id}, database="990data_public") %}
