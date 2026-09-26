@@ -3,6 +3,11 @@ name: Leak scan
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    # Every push to main gets the whole-tree scan (scan-tree job only; the added-lines job
+    # needs a PR diff). Catches direct pushes and merges as they land, not a week later.
+    # main ONLY: canary and PR branches are not watched here (decisions_log §184(c)).
+    branches: [main]
   schedule:
     # Weekly whole-tree sweep (scan-tree job only): catches drift that lands
     # between PRs — web edits, API commits, hook-bypassed pushes.
@@ -25,8 +30,11 @@ env:
 
 jobs:
   scan:
-    # Added-lines scan: PR events only (scheduled/manual runs have no diff).
-    if: github.event_name == 'pull_request'
+    # Added-lines scan: PR events only (scheduled/manual/push runs have no diff).
+    # Skipped on Dependabot's own PRs — only when the PR author AND the run's triggering
+    # actor are both dependabot[bot]; a person pushing onto a Dependabot PR is still
+    # scanned, and nothing here keys on the branch name (decisions_log §184(c)).
+    if: github.event_name == 'pull_request' && !(github.event.pull_request.user.login == 'dependabot[bot]' && github.triggering_actor == 'dependabot[bot]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,6 +146,8 @@ jobs:
     # red regardless of how it arrived. Semantics mirror the local pre-push
     # gate exactly (line-filter allowlist, no binary skip) so the two layers
     # always agree about the same tree.
+    # Same Dependabot skip as the scan job above, and only on a PR (decisions_log §184(c)).
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' && github.triggering_actor == 'dependabot[bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -149,6 +159,10 @@ jobs:
           exit 1
 
       - name: Whole-tree scan for operator/identity leak markers
+        # DELIBERATE DIVERGENCE (decisions_log §184(a), 2026-09-26): the frozen LEAK_PATTERN keeps
+        # one entry that the maintained local list has since dropped. CI keeps it on purpose —
+        # removing it would mean rewriting the frozen secret, which the 9-entry residual check
+        # below exists to protect. Revisit only if a legitimate change ever fails on that entry.
         env:
           LEAK_PATTERN: ${{ secrets.LEAK_PATTERN }}
           LEAK_PATTERN_LOCAL: ${{ secrets.LEAK_PATTERN_LOCAL }}
