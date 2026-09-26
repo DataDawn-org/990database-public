@@ -28,6 +28,17 @@ Fix sequence (in this script, per table):
 Natural keys are full-column equality per decisions_log §63. The
 capital_gains residual same-day-same-price edge case is accepted per §62.
 
+⛔ TOMBSTONE (2026-07-09, decisions_log §111 — DO NOT RE-RUN OR IMITATE FOR
+OFFICER TABLES): full-column byte-identity dedup is RETIRED as a class for
+officers/top_employees. The docstring's premise ("Differing in any column =>
+both rows kept" = legit multi-record safe) is FALSE when the identity field
+can be absent: the PF parser dropped BusinessNameLine1Txt-carried names →
+DISTINCT officers became byte-identical → this migration deleted real people
+(witnessed raw-XML; predicted ≈6,110 nameless-class rows; repair =
+followup_queue #306/#307). The 05-22 "true-bug" counts were never
+XML-classified — see the §63 correction note (2026-07-09) before trusting
+them as a floor. §110 keyed dedup is the only sanctioned officer mechanism.
+
 References:
   - bestpractices/incident_log.md 2026-05-22 entry
   - bestpractices/decisions_log.md §61 (parser idempotency rule)

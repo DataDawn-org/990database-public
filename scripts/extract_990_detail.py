@@ -21,6 +21,8 @@ import sys
 import time
 from lxml import etree as ET
 
+from name_rules import join_name
+
 # XXE-hardened parser for IRS XML — disable external entities + network DTD lookup
 # (per-worker module-level constant; lxml XMLParser is process-safe after fork).
 _SAFE_PARSER = ET.XMLParser(resolve_entities=False, no_network=True)
@@ -71,6 +73,34 @@ def float_or_none(val):
         return float(val)
     except (ValueError, TypeError):
         return None
+
+
+def first_text(el, *dotted_paths):
+    """Text of the first dotted-path whose text is non-None. Band-1 §C uses
+    this for the two TY2018→2019 tag-rename fallback chains (modern tag first;
+    an empty modern element carries no text → falls through to the legacy tag —
+    the manifest rule-5 value-level pin)."""
+    for path in dotted_paths:
+        txt = find_text(el, path)
+        if txt is not None:
+            return txt
+    return None
+
+
+def _bool01(val, counter):
+    """Manifest rule 2 boolean normalization (witnessed dev semantics, exact):
+    'true'/'1'/'X' → 1; 'false'/'0' → 0; absent → NULL (rule 3 — never 0).
+    Unexpected encodings → NULL + counted into `counter` (rule-5 pin: loud,
+    never silently coerced); the writer aggregates and reports them."""
+    if val is None:
+        return None
+    v = val.strip()
+    if v in ("1", "true", "X"):
+        return 1
+    if v in ("0", "false"):
+        return 0
+    counter[v] = counter.get(v, 0) + 1
+    return None
 
 
 # §2 Deliverable A: the monthly's EIN path — single source of truth. The backfill adapter
@@ -128,8 +158,124 @@ CREATE INDEX IF NOT EXISTS idx_relorg_related_ein ON related_orgs(related_ein);
 """
 
 
+# ── Band-1 remainder §B/§C (manifest as amended 2026-07-18; ported from
+# dev_extract_band1_remainder.py 2026-07-19) ─────────────────────────────────
+# Part VI governance + Part IV checklist, one row per parsed Form-990
+# object_id. Idempotency = per-object_id DELETE-then-INSERT (§F own
+# responsibility list — deliberately NEVER folded into the officers/
+# schedule_i/related_orgs discovery intersection; the historical corpus is the
+# backfill's job, with its own file list).
+
+# §B: returns_governance — (column, anchored path under IRS990). The two
+# *_cnt columns are Part VI Sec A counts — DISTINCT tags from the Part I pair
+# on returns (§A), near-identical names; keep both, never merge (manifest §B).
+B_COLS = [
+    ("conflict_of_interest_policy_ind", "ConflictOfInterestPolicyInd"),
+    ("coi_annual_disclosure_ind", "AnnualDisclosureCoveredPrsnInd"),
+    ("coi_regular_monitoring_ind", "RegularMonitoringEnfrcInd"),
+    ("whistleblower_policy_ind", "WhistleblowerPolicyInd"),
+    ("document_retention_policy_ind", "DocumentRetentionPolicyInd"),
+    ("comp_process_ceo_ind", "CompensationProcessCEOInd"),
+    ("comp_process_other_ind", "CompensationProcessOtherInd"),
+    ("family_or_business_rln_ind", "FamilyOrBusinessRlnInd"),
+    ("material_diversion_ind", "MaterialDiversionOrMisuseInd"),
+    ("form990_provided_to_board_ind", "Form990ProvidedToGvrnBodyInd"),
+    ("governing_body_voting_members_cnt", "GoverningBodyVotingMembersCnt"),
+    ("independent_voting_members_cnt", "IndependentVotingMemberCnt"),
+    ("delegation_of_mgmt_duties_ind", "DelegationOfMgmtDutiesInd"),
+    ("minutes_of_governing_body_ind", "MinutesOfGoverningBodyInd"),
+]
+B_INT_COLS = {"governing_body_voting_members_cnt", "independent_voting_members_cnt"}
+
+# §C: returns_checklist — (column, (modern tag, *legacy tags)); the two
+# year-variant pairs carry both read paths (TY2018→2019 renames), write axis
+# year-invariant. 53 columns, enumeration CLOSED 2026-07-18
+# (part_iv_checklist_enumeration receipt; 2,400 filings, 0 anomalies).
+C_COLS = [
+    ("described_in_section_501c3_ind", ("DescribedInSection501c3Ind",)),
+    ("schedule_b_required_ind", ("ScheduleBRequiredInd",)),
+    ("political_campaign_acty_ind", ("PoliticalCampaignActyInd",)),
+    ("lobbying_activities_ind", ("LobbyingActivitiesInd",)),
+    ("subject_to_proxy_tax_ind", ("SubjectToProxyTaxInd",)),
+    ("donor_advised_fund_ind", ("DonorAdvisedFundInd",)),
+    ("conservation_easements_ind", ("ConservationEasementsInd",)),
+    ("collections_of_art_ind", ("CollectionsOfArtInd",)),
+    ("credit_counseling_ind", ("CreditCounselingInd",)),
+    ("donor_rstr_or_quasi_endowments_ind",
+     ("DonorRstrOrQuasiEndowmentsInd", "TempOrPermanentEndowmentsInd")),
+    ("report_land_building_equipment_ind", ("ReportLandBuildingEquipmentInd",)),
+    ("report_investments_other_sec_ind", ("ReportInvestmentsOtherSecInd",)),
+    ("report_program_related_invst_ind", ("ReportProgramRelatedInvstInd",)),
+    ("report_other_assets_ind", ("ReportOtherAssetsInd",)),
+    ("report_other_liabilities_ind", ("ReportOtherLiabilitiesInd",)),
+    ("include_fin48_footnote_ind", ("IncludeFIN48FootnoteInd",)),
+    ("independent_audit_fincl_stmt_ind", ("IndependentAuditFinclStmtInd",)),
+    ("consolidated_audit_fincl_stmt_ind", ("ConsolidatedAuditFinclStmtInd",)),
+    ("school_operating_ind", ("SchoolOperatingInd",)),
+    ("foreign_office_ind", ("ForeignOfficeInd",)),
+    ("foreign_activities_ind", ("ForeignActivitiesInd",)),
+    ("more_than_5000k_to_org_ind", ("MoreThan5000KToOrgInd",)),
+    ("more_than_5000k_to_individuals_ind", ("MoreThan5000KToIndividualsInd",)),
+    ("professional_fundraising_ind", ("ProfessionalFundraisingInd",)),
+    ("fundraising_activities_ind", ("FundraisingActivitiesInd",)),
+    ("gaming_activities_ind", ("GamingActivitiesInd",)),
+    ("operate_hospital_ind", ("OperateHospitalInd",)),
+    ("audited_financial_stmt_att_ind", ("AuditedFinancialStmtAttInd",)),
+    ("grants_to_organizations_ind", ("GrantsToOrganizationsInd",)),
+    ("grants_to_individuals_ind", ("GrantsToIndividualsInd",)),
+    ("schedule_j_required_ind", ("ScheduleJRequiredInd",)),
+    ("tax_exempt_bonds_ind", ("TaxExemptBondsInd",)),
+    ("invest_tax_exempt_bonds_ind", ("InvestTaxExemptBondsInd",)),
+    ("escrow_account_ind", ("EscrowAccountInd",)),
+    ("on_behalf_of_issuer_ind", ("OnBehalfOfIssuerInd",)),
+    ("engaged_in_excess_benefit_trans_ind", ("EngagedInExcessBenefitTransInd",)),
+    ("py_excess_benefit_trans_ind", ("PYExcessBenefitTransInd",)),
+    ("loan_outstanding_ind", ("LoanOutstandingInd",)),
+    ("grant_to_related_person_ind", ("GrantToRelatedPersonInd",)),
+    ("business_rln_with_org_mem_ind", ("BusinessRlnWithOrgMemInd",)),
+    ("business_rln_with_fam_mem_ind", ("BusinessRlnWithFamMemInd",)),
+    ("business_rln_with_35_ctrl_ent_ind",
+     ("BusinessRlnWith35CtrlEntInd", "BusinessRlnWithOfficerEntInd")),
+    ("deductible_non_cash_contri_ind", ("DeductibleNonCashContriInd",)),
+    ("deductible_art_contribution_ind", ("DeductibleArtContributionInd",)),
+    ("terminate_operations_ind", ("TerminateOperationsInd",)),
+    ("partial_liquidation_ind", ("PartialLiquidationInd",)),
+    ("disregarded_entity_ind", ("DisregardedEntityInd",)),
+    ("related_entity_ind", ("RelatedEntityInd",)),
+    ("related_organization_ctrl_ent_ind", ("RelatedOrganizationCtrlEntInd",)),
+    ("transaction_with_control_ent_ind", ("TransactionWithControlEntInd",)),
+    ("trnsfr_exmpt_non_chrtbl_rltd_org_ind", ("TrnsfrExmptNonChrtblRltdOrgInd",)),
+    ("activities_conducted_prtshp_ind", ("ActivitiesConductedPrtshpInd",)),
+    ("schedule_o_required_ind", ("ScheduleORequiredInd",)),
+]
+
+assert len(C_COLS) == 53, f"§C must carry exactly 53 columns, got {len(C_COLS)}"
+
+
+def _band1_schema_sql():
+    """DDL for the §B/§C tables, generated from B_COLS/C_COLS (single source —
+    the same lists drive extraction, DDL, and the insert SQL)."""
+    b_ddl = ",\n    ".join(f"{c} INTEGER" for c, _p in B_COLS)
+    c_ddl = ",\n    ".join(f"{c} INTEGER" for c, _t in C_COLS)
+    return f"""
+CREATE TABLE IF NOT EXISTS returns_governance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id TEXT NOT NULL, ein TEXT,
+    {b_ddl}
+);
+CREATE INDEX IF NOT EXISTS idx_governance_oid ON returns_governance(object_id);
+CREATE TABLE IF NOT EXISTS returns_checklist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id TEXT NOT NULL, ein TEXT,
+    {c_ddl}
+);
+CREATE INDEX IF NOT EXISTS idx_checklist_oid ON returns_checklist(object_id);
+"""
+
+
 def create_schema(con):
     con.executescript(SCHEMA_SQL)
+    con.executescript(_band1_schema_sql())
     con.commit()
 
 
@@ -197,6 +343,11 @@ def parse_file(args):
         "contractors": [],
         "schedule_i": [],
         "related_orgs": [],
+        # Band-1 §B/§C: None = not emitted (non-990 / IRS990 element absent /
+        # parse error); a list = one row's values, written delete-then-insert.
+        "governance": None,
+        "checklist": None,
+        "band1_unexpected_bool": None,
         "error": None,
     }
 
@@ -211,6 +362,7 @@ def parse_file(args):
             _extract_contractors(root, result)
             _extract_schedule_i(root, result)
             _extract_schedule_r(root, result)
+            _extract_governance_checklist(root, result)
         elif return_type == "990EZ":
             _extract_990ez_officers(root, result)
 
@@ -220,14 +372,27 @@ def parse_file(args):
     return result
 
 
+def full_biz_name(biz):
+    """BusinessName container element -> Line1 [+ Line2] under the #306/#299
+    rule — ONE implementation, name_rules.join_name (see that module's header).
+    _contractor_name below is the CERTIFIED monthly writer's own proven idiom
+    (#264/#296) and deliberately does NOT consume it."""
+    if biz is None:
+        return None
+    return join_name(find_text(biz, "BusinessNameLine1Txt"),
+                     find_text(biz, "BusinessNameLine2Txt"))
+
+
 def _officer_name(grp):
-    """§F person axis — the 3-slot carrier fallback PersonNm → BusinessName/BusinessNameLine1Txt
-    → PersonName, identical to instrument_officer_multiset.person_name (the same-measurement
-    function that adjudicated the swept corpus). The pre-B parser read only the first two slots;
-    aligned per R1–R3 rulings 2026-07-05 so the monthly writer and the re-derive cannot drift
-    on the person axis."""
+    """§F person axis — the 3-slot carrier fallback PersonNm → BusinessName (Line1
+    [+ Line2] per full_biz_name, #306 2026-07-11) → PersonName, identical to
+    instrument_officer_multiset.person_name (the same-measurement function that
+    adjudicated the swept corpus). The pre-B parser read only the first two slots;
+    aligned per R1–R3 rulings 2026-07-05 so the monthly writer and the re-derive
+    cannot drift on the person axis."""
     name = find_text(grp, "PersonNm")
     if name is None:
+        # LEGACY EMISSION — phase-1 posture (DO-NOT #2): Line1-only until the flip.
         biz = grp.find(_tag("BusinessName"))
         if biz is not None:
             name = find_text(biz, "BusinessNameLine1Txt")
@@ -278,7 +443,25 @@ def dedup_officers_keyed(rows):
             out.append(g[0])          # singleton: raw emission, byte round-trip
         else:
             name, title, nums, flags = k
-            out.append((g[0][0], g[0][1], name, title) + nums + tuple(flags))
+            # Collapse storage, amended 2026-07-07 (maintainer-ratified remedy for the
+            # 2026-07-06 GATE_BASELINE_RED class, 17,304 fabricated rows): per
+            # numeric slot store the FIRST NON-NULL member value; NULL only when
+            # EVERY member is absent. The ruled absent-vs-zero pair still stores 0
+            # (the non-NULL member IS the filed 0); what changed is absent-vs-absent,
+            # which previously stored the KEY's canonicalized 0 — a value no member
+            # filed (visible as benefits/expense_account = 0 on Form 990 rows, where
+            # those elements structurally cannot appear). By key construction all
+            # non-NULL members of a group agree per slot (the six numerics are IN
+            # the key, canonicalized) — the assert makes that executable, fail-loud:
+            # if it ever fires, the group was never a true dup.
+            merged = []
+            for idx in (4, 5, 6, 7, 8, 9):
+                vals = [t[idx] for t in g if t[idx] is not None]
+                assert all(v == vals[0] for v in vals), (
+                    f"collapse group non-NULL members disagree on slot {idx}: "
+                    f"{vals!r} — not a true dup; §110 key construction violated")
+                merged.append(vals[0] if vals else None)
+            out.append((g[0][0], g[0][1], name, title) + tuple(merged) + tuple(flags))
     return out
 
 
@@ -359,6 +542,28 @@ def _extract_990ez_officers(root, result):
             None,      # is_highest_compensated_employee
             None, None, None, None, None,  # is_officer/indiv_trustee/inst_trustee/key_employee/former
         ))
+
+
+def _extract_governance_checklist(root, result):
+    """Band-1 §B/§C: Part VI governance + Part IV checklist, flat direct
+    children of IRS990 (anchored — no bare-leaf descent past the form element).
+    Emits one values-list per table; a Form-990 filing without an IRS990
+    element emits neither (matches the witnessed dev module — no row, not an
+    all-NULL row)."""
+    irs = root.find(f".//{_tag('IRS990')}")
+    if irs is None:
+        return
+    unexpected = {}
+    result["governance"] = [
+        int_or_none(find_text(irs, path)) if col in B_INT_COLS
+        else _bool01(find_text(irs, path), unexpected)
+        for col, path in B_COLS
+    ]
+    result["checklist"] = [
+        _bool01(first_text(irs, *tags), unexpected) for _col, tags in C_COLS
+    ]
+    if unexpected:
+        result["band1_unexpected_bool"] = unexpected
 
 
 def _contractor_name(grp):
@@ -589,9 +794,14 @@ def writer_process(db_path, result_queue, total_files,
     related_buf = []
     contractor_buf = []
     contractor_del_buf = []
+    governance_buf = []
+    checklist_buf = []
+    band1_del_buf = []  # one DELETE list drives both §B/§C tables (paired rows)
     processed = 0
     counts = {"officers": 0, "schedule_i": 0, "related_orgs": 0, "contractors": 0,
-              "contractor_rows_deleted": 0, "errors": 0}
+              "contractor_rows_deleted": 0, "governance": 0, "checklist": 0,
+              "errors": 0}
+    band1_unexpected = {}  # aggregated across files; reported loud at exit
     t0 = time.time()
     last_log = 0
 
@@ -618,6 +828,17 @@ def writer_process(db_path, result_queue, total_files,
         (object_id, ein, contractor_name, city, state, service_type, compensation)
         VALUES (?,?,?,?,?,?,?)"""
     CONTRACTOR_DEL_SQL = "DELETE FROM contractors WHERE object_id=?"
+    # Band-1 §B/§C: same per-oid DELETE-then-INSERT contract as contractors
+    # (§F own responsibility list — never gated by the legacy skip sets); a
+    # parse-error result neither deletes nor inserts.
+    GOVERNANCE_SQL = (f"INSERT INTO returns_governance (object_id, ein, "
+                      f"{', '.join(c for c, _p in B_COLS)}) "
+                      f"VALUES ({', '.join('?' * (len(B_COLS) + 2))})")
+    GOVERNANCE_DEL_SQL = "DELETE FROM returns_governance WHERE object_id=?"
+    CHECKLIST_SQL = (f"INSERT INTO returns_checklist (object_id, ein, "
+                     f"{', '.join(c for c, _t in C_COLS)}) "
+                     f"VALUES ({', '.join('?' * (len(C_COLS) + 2))})")
+    CHECKLIST_DEL_SQL = "DELETE FROM returns_checklist WHERE object_id=?"
     SCHED_I_SQL = """INSERT INTO schedule_i_990
         (object_id, ein, recipient_name, recipient_ein,
          recipient_city, recipient_state, recipient_zip,
@@ -673,6 +894,19 @@ def writer_process(db_path, result_queue, total_files,
                     contractor_buf.extend(r["contractors"])
                     counts["contractors"] += len(r["contractors"])
 
+            # Band-1 §B/§C — DELETE-then-INSERT per parsed 990 with an IRS990
+            # element (governance/checklist emitted together or not at all);
+            # never on a parse error. NOT gated by the legacy skip sets (§F).
+            if r.get("governance") is not None and not r.get("error"):
+                band1_del_buf.append((oid,))
+                governance_buf.append([oid, r["ein"]] + r["governance"])
+                checklist_buf.append([oid, r["ein"]] + r["checklist"])
+                counts["governance"] += 1
+                counts["checklist"] += 1
+            if r.get("band1_unexpected_bool"):
+                for raw, n in r["band1_unexpected_bool"].items():
+                    band1_unexpected[raw] = band1_unexpected.get(raw, 0) + n
+
         # Flush buffers — ALL tables under ONE commit whenever ANY buffer hits the
         # threshold (#264 P9 cross-table fix): a filing committed in the legacy
         # tables can then never be missing its contractor leg; an interrupted
@@ -681,7 +915,8 @@ def writer_process(db_path, result_queue, total_files,
                 or len(sched_i_buf) >= BATCH_INSERT_SIZE
                 or len(related_buf) >= BATCH_INSERT_SIZE
                 or len(contractor_del_buf) >= BATCH_INSERT_SIZE
-                or len(contractor_buf) >= BATCH_INSERT_SIZE):
+                or len(contractor_buf) >= BATCH_INSERT_SIZE
+                or len(band1_del_buf) >= BATCH_INSERT_SIZE):
             con.executemany(OFFICER_SQL, officer_buf)
             con.executemany(SCHED_I_SQL, sched_i_buf)
             con.executemany(RELATED_SQL, related_buf)
@@ -689,12 +924,19 @@ def writer_process(db_path, result_queue, total_files,
             con.executemany(CONTRACTOR_DEL_SQL, contractor_del_buf)
             counts["contractor_rows_deleted"] += con.total_changes - pre_changes
             con.executemany(CONTRACTOR_SQL, contractor_buf)
+            con.executemany(GOVERNANCE_DEL_SQL, band1_del_buf)
+            con.executemany(GOVERNANCE_SQL, governance_buf)
+            con.executemany(CHECKLIST_DEL_SQL, band1_del_buf)
+            con.executemany(CHECKLIST_SQL, checklist_buf)
             con.commit()
             officer_buf.clear()
             sched_i_buf.clear()
             related_buf.clear()
             contractor_del_buf.clear()
             contractor_buf.clear()
+            band1_del_buf.clear()
+            governance_buf.clear()
+            checklist_buf.clear()
 
         if processed - last_log >= LOG_INTERVAL:
             elapsed = time.time() - t0
@@ -723,6 +965,11 @@ def writer_process(db_path, result_queue, total_files,
         con.executemany(CONTRACTOR_DEL_SQL, contractor_del_buf)
         counts["contractor_rows_deleted"] += con.total_changes - pre_changes
         con.executemany(CONTRACTOR_SQL, contractor_buf)
+    if band1_del_buf:
+        con.executemany(GOVERNANCE_DEL_SQL, band1_del_buf)
+        con.executemany(GOVERNANCE_SQL, governance_buf)
+        con.executemany(CHECKLIST_DEL_SQL, band1_del_buf)
+        con.executemany(CHECKLIST_SQL, checklist_buf)
     con.commit()
 
     elapsed = time.time() - t0
@@ -735,12 +982,27 @@ def writer_process(db_path, result_queue, total_files,
         f"contractors: {counts['contractors']:,} inserted / "
         f"{counts['contractor_rows_deleted']:,} deleted "
         f"(net {counts['contractors'] - counts['contractor_rows_deleted']:+,}) | "
+        f"governance: {counts['governance']:,} | "
+        f"checklist: {counts['checklist']:,} | "
         f"errors: {counts['errors']:,}"
     )
+    if band1_unexpected:
+        # Rule-5 pin: unexpected boolean encodings are stored NULL but must
+        # surface loudly, never vanish into a worker process.
+        logging.warning(
+            f"BAND1 UNEXPECTED boolean encodings (stored NULL): {band1_unexpected}"
+        )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
 def main():
+    # Corpus write-lock seam gate (completeness spec §0.12): delegated under
+    # update.sh's lock via CORPUS_LOCK_TOKEN_990; standalone runs acquire
+    # (auto-release at exit); any other holder = hard stop, never a warning.
+    sys.path.insert(0, "/mnt/data/datadawn/tools")
+    from corpus_lock import gate as _corpus_gate
+    _corpus_gate("990", intent="extract_990_detail.py (officers/contractors/top_employees)")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -807,7 +1069,8 @@ def _print_summary(db_path):
     con = sqlite3.connect(db_path)
     logging.info("─── 990/990EZ Detail Extraction Summary ───")
 
-    for table in ("officers", "schedule_i_990", "related_orgs", "contractors"):
+    for table in ("officers", "schedule_i_990", "related_orgs", "contractors",
+                  "returns_governance", "returns_checklist"):
         try:
             count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             logging.info(f"  {table}: {count:,} rows")

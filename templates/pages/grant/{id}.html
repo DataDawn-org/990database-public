@@ -3,10 +3,13 @@
 {% block title %}Grant Detail — DataDawn{% endblock %}
 
 {% block content %}
+{% from "_recip_copy.html" import matched_label, verify_inline, disclosure, completeness_caveat %}
 
 {% set grant_rows = sql("SELECT g.id, g.object_id, g.ein, g.grant_type, g.recipient_name, g.recipient_city, g.recipient_state, g.recipient_country, g.recipient_zip, g.relationship, g.foundation_status, g.purpose, g.amount, g.grant_date, g.expended_amount, b.name AS funder_name, r2.tax_year AS filing_tax_year, r2.return_type AS filing_return_type, r2.contributions_paid AS filing_contributions_paid FROM grants g LEFT JOIN returns r2 ON r2.object_id = g.object_id LEFT JOIN bmf b ON b.ein = g.ein WHERE g.id = :id LIMIT 1", {"id": id}, database="990data_public") %}
 
 {% if not grant_rows %}
+{# Not-found must carry a 404 status, else junk ids index as live pages (soft-404). #}
+{{ custom_status(404) }}
 
 <div class="not-found">
   <h1>Grant Not Found</h1>
@@ -20,17 +23,33 @@
 
 {% set history = sql("SELECT g2.id, g2.amount, g2.grant_date, g2.purpose, g2.grant_type, r2.tax_year FROM grants g2 LEFT JOIN returns r2 ON r2.object_id = g2.object_id WHERE g2.ein = :funder_ein AND g2.recipient_name = :recip_name COLLATE NOCASE AND g2.id != :grant_id ORDER BY r2.tax_year DESC, g2.amount DESC LIMIT 20", {"funder_ein": g["ein"], "recip_name": g["recipient_name"], "grant_id": g["id"]}, database="990data_public") %}
 
-{% set other_funders = sql("SELECT g3.ein, b.name AS funder_name, SUM(g3.amount) AS total, COUNT(*) AS num_grants FROM grants g3 LEFT JOIN bmf b ON b.ein = g3.ein WHERE g3.recipient_name = :recip_name COLLATE NOCASE AND g3.ein != :funder_ein AND g3.grant_type = 'paid' GROUP BY g3.ein ORDER BY total DESC LIMIT 20", {"recip_name": g["recipient_name"], "funder_ein": g["ein"]}, database="990data_public") %}
+{% set other_funders = sql("SELECT g3.ein, b.name AS funder_name, SUM(g3.amount) AS total, COUNT(*) AS num_grants FROM grants g3 JOIN canonical_filings cf3 ON cf3.object_id = g3.object_id LEFT JOIN bmf b ON b.ein = g3.ein WHERE g3.recipient_name = :recip_name COLLATE NOCASE AND g3.ein != :funder_ein AND g3.grant_type = 'paid' GROUP BY g3.ein ORDER BY total DESC LIMIT 20", {"recip_name": g["recipient_name"], "funder_ein": g["ein"]}, database="990data_public") %}
 
-{% set recipient_org = sql("SELECT b.ein, b.name FROM bmf b WHERE b.name = :recip_name COLLATE NOCASE LIMIT 1", {"recip_name": g["recipient_name"]}, database="990data_public") if g["recipient_name"] else [] %}
+{# Recipient -> org resolution. `grants` carries NO recipient EIN, so this is a NAME match against the IRS BMF.
+   Design B (ER QC audit): link only when the name is globally unique, or — if shared by several orgs —
+   exactly one of them is in the recipient's state. Never arbitrary-pick among same-named orgs; disclose instead. #}
+{% set recip_count_rows = sql("SELECT COUNT(DISTINCT ein) AS n FROM bmf WHERE UPPER(name) = UPPER(:rn)", {"rn": g["recipient_name"]}, database="990data_public") if g["recipient_name"] else [] %}
+{% set recip_count = recip_count_rows[0]["n"] if recip_count_rows else 0 %}
+{# Cascade: unique name -> link; else exactly 1 in recipient's state -> link; else (>=2 in state) exactly 1 in state+city -> link; else disclose. (ER QC: Design B + city) #}
+{% set recip_state = sql("SELECT ein, name FROM bmf WHERE UPPER(name) = UPPER(:rn) AND (:tot = 1 OR UPPER(COALESCE(state,'')) = UPPER(:rst)) LIMIT 3", {"rn": g["recipient_name"], "tot": recip_count, "rst": g["recipient_state"] or ""}, database="990data_public") if recip_count else [] %}
+{% set recip_city = sql("SELECT ein, name FROM bmf WHERE UPPER(name) = UPPER(:rn) AND UPPER(COALESCE(state,'')) = UPPER(:rst) AND UPPER(COALESCE(city,'')) = UPPER(:rci) LIMIT 2", {"rn": g["recipient_name"], "rst": g["recipient_state"] or "", "rci": g["recipient_city"] or ""}, database="990data_public") if (recip_count > 1 and recip_state|length >= 2 and g["recipient_city"]) else [] %}
+{% set recip_link = recip_state[0] if (recip_count == 1 or recip_state|length == 1) else (recip_city[0] if recip_city|length == 1 else None) %}
+{% set recip_basis = "name" if recip_count == 1 else ("name + state" if recip_state|length == 1 else "name + state + city") %}
+{# Disclosure branch (only when ambiguous and NOT linked): GEN-certified federation > same-state cluster (agnostic per Part-1) > none-in-recipient-state. #}
+{# GEN branch fires ONLY when ALL same-named EINs share one real group exemption (certified; conservative — mixed clusters fall through to agnostic). #}
+{% set recip_gen = sql("SELECT 1 FROM bmf WHERE UPPER(name) = UPPER(:rn) GROUP BY UPPER(name) HAVING COUNT(DISTINCT grp) = 1 AND MIN(grp) NOT IN ('0000','0','')", {"rn": g["recipient_name"]}, database="990data_public") if (recip_count > 1 and not recip_link) else [] %}
+{% set recip_branch = 'gen' if recip_gen else ('cluster' if recip_state|length >= 2 else 'none') %}
 
 <div class="page-header">
   <div class="grant-flow-header">
     <span class="flow-entity"><a href="/org/{{ g['ein'] }}">{{ funder_name }}</a></span>
     <span class="flow-arrow">&rarr;</span>
     <span class="flow-entity">
-      {% if recipient_org %}
-      <a href="/org/{{ recipient_org[0]['ein'] }}">{{ g["recipient_name"] }}</a>
+      {% if recip_link %}
+      <a href="/org/{{ recip_link['ein'] }}">{{ g["recipient_name"] }}</a> {{ matched_label(recip_basis) }}
+      {% elif recip_count > 1 %}
+      {{ g["recipient_name"] }}
+      <span style="font-size:0.65em; color:var(--text-muted); font-weight:400; white-space:nowrap;">{{ recip_count }} share this name — not linked</span>
       {% else %}
       {{ g["recipient_name"] or "Unknown Recipient" }}
       {% endif %}
@@ -108,10 +127,17 @@
       <div class="detail-value money">{{ "${:,.0f}".format(g["filing_contributions_paid"]) }}</div>
     </div>
     {% endif %}
-    {% if recipient_org %}
+    {% if recip_link %}
+    <div class="detail-item">
+      <div class="detail-label">Recipient Org <span style="font-weight:400; color:var(--text-muted);">(matched by {{ recip_basis }})</span></div>
+      <div class="detail-value"><a href="/org/{{ recip_link['ein'] }}">{{ recip_link["name"] }}</a>
+        {{ verify_inline("grant records carry no recipient EIN") }}
+      </div>
+    </div>
+    {% elif recip_count > 1 %}
     <div class="detail-item">
       <div class="detail-label">Recipient Org</div>
-      <div class="detail-value"><a href="/org/{{ recipient_org[0]['ein'] }}">{{ recipient_org[0]["name"] }}</a></div>
+      <div class="detail-value" style="color:var(--text-muted);">{{ disclosure(recip_branch, recip_count, g["recipient_name"], g["recipient_state"]) }}</div>
     </div>
     {% endif %}
     <div class="detail-item">
@@ -152,6 +178,7 @@
 {% if other_funders %}
 <div class="section">
   <h2 class="section-title">Other Funders of {{ g["recipient_name"] }}</h2>
+  {{ completeness_caveat('funders') }}
   <div class="table-wrap">
   <table class="data-table">
     <thead>

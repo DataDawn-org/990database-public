@@ -156,6 +156,13 @@ def extract_schedule_i_grants(filepath, funder_ein, funder_name, tax_year):
 
 
 def main():
+    # Corpus write-lock seam gate (completeness spec §0.12): delegated under
+    # update.sh's lock via CORPUS_LOCK_TOKEN_990; standalone runs acquire
+    # (auto-release at exit); any other holder = hard stop, never a warning.
+    sys.path.insert(0, "/mnt/data/datadawn/tools")
+    from corpus_lock import gate as _corpus_gate
+    _corpus_gate("990", intent="extract_schedule_i.py (schedule_i_990/grants)")
+
     db = sqlite3.connect(DB_PATH)
     db.execute("PRAGMA journal_mode=WAL")
     
@@ -184,9 +191,16 @@ def main():
     target_eins = [t[0] for t in TARGETS]
     placeholders = ','.join(['?' for _ in target_eins])
     
+    # Canonical-filing selection (Phase-1, 2026-07-06): discover from canonical_returns,
+    # not returns — this table has NO object_id column, so the shared canonical layer
+    # cannot cover it; the selection lives HERE in the discovery query instead (the
+    # ratified builder-side mechanism). Extracting every `returns` row doubled the 6
+    # funder-years where an amendment coexists with its original (measured excess
+    # 71,921 rows / $13.92B, code-verified 2026-07-06 — Fidelity/2021 was ~2x). One
+    # extraction per (ein, tax_year, return_type) partition, amended-over-original.
     filings = db.execute(f"""
         SELECT ein, org_name, tax_year, source_file
-        FROM returns
+        FROM canonical_returns
         WHERE ein IN ({placeholders})
           AND return_type = '990'
         ORDER BY ein, tax_year

@@ -540,7 +540,7 @@
 
     <div class="search-header">
         <h1>990 Filings Explorer</h1>
-        <p>Search 5.2 million IRS 990 filings &mdash; 990, 990-EZ, and 990-PF. Find any nonprofit's financials, officers, grants, and filing history.</p>
+        <p>Search 5.7 million IRS 990 filings. Look up any of 1.96 million tax-exempt organizations; 772,000 have financial detail here, and every organization's page explains what's available for it.</p>
     </div>
 
     <div class="search-container">
@@ -733,8 +733,10 @@
                 ORDER BY tax_year DESC, total_revenue DESC
                 LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
             `;
+            const countSql = `SELECT COUNT(*) AS cnt FROM returns WHERE ${where} ${filterW}`;
 
-            const rows = await query(sql);
+            const [rows, countRows] = await Promise.all([query(sql), query(countSql).catch(() => null)]);
+            const totalCount = countRows && countRows[0] ? countRows[0].cnt : null;
             const hasMore = rows.length > PAGE_SIZE;
             if (hasMore) rows.pop();
 
@@ -746,7 +748,8 @@
             let html = '';
             if (offset === 0) {
                 const qEnc = encodeURIComponent(q);
-                html += `<div class="status"><span class="count">${rows.length}${hasMore ? '+' : ''}</span> filings found${hasMore ? ` <a href="results.html?tab=orgs&q=${qEnc}" style="margin-left:1rem;color:var(--dawn-amber);text-decoration:none;font-size:0.9rem">Explore all results &rarr;</a>` : ''}</div>`;
+                const countLabel = totalCount != null ? Number(totalCount).toLocaleString() : `${rows.length}${hasMore ? '+' : ''}`;
+                html += `<div class="status"><span class="count">${countLabel}</span> filings found${hasMore ? ` <a href="results.html?tab=orgs&q=${qEnc}" style="margin-left:1rem;color:var(--dawn-amber);text-decoration:none;font-size:0.9rem">Explore all results &rarr;</a>` : ''}</div>`;
             }
 
             for (const r of rows) {
@@ -921,7 +924,7 @@
                 html += `<a href="/explore/bmf.html?q=${encodeURIComponent(filing.ein)}&detail=${encodeURIComponent(filing.ein)}" target="_blank" class="doc-link">BMF Explorer &rarr;</a>`;
                 html += `<a href="/explore/grants.html?q=${encodeURIComponent(filing.ein)}" target="_blank" class="doc-link">Grants Explorer &rarr;</a>`;
                 html += `<a href="/explore/daf.html?q=${encodeURIComponent(filing.ein)}" target="_blank" class="doc-link">DAF Grants Explorer &rarr;</a>`;
-                html += `<a href="/990data_public/returns/${esc(objectId)}" target="_blank" class="doc-link">Raw Filing Record &rarr;</a>`;
+                html += `<a href="/filing/${esc(objectId)}" target="_blank" class="doc-link">Full Filing Page &rarr;</a>`;
                 html += `<a href="https://projects.propublica.org/nonprofits/organizations/${esc(filing.ein)}" target="_blank" class="doc-link">ProPublica Nonprofit Explorer &rarr;</a>`;
                 html += '</div>';
 

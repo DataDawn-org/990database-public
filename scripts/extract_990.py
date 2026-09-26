@@ -17,7 +17,10 @@ from pathlib import Path
 import sqlite3
 import sys
 import time
+from collections import Counter
 from lxml import etree as ET
+
+from name_rules import join_name, classify_line2
 
 # XXE-hardened parser for IRS XML — disable external entities + network DTD lookup
 # (per-worker module-level constant; lxml XMLParser is process-safe after fork).
@@ -32,6 +35,17 @@ NS = "http://www.irs.gov/efile"
 WORKER_CHUNK_SIZE = 500
 BATCH_INSERT_SIZE = 2000
 LOG_INTERVAL = 10_000
+
+# Collision baseline (2026-07-16 audit). The same-object_id collision set is TWO extinct
+# IRS TEOS bulk re-export events (2018 + 2020), 93,148 clean 2-way pairs, PROVEN 0/93,148
+# substantive diffs in extracted returns fields (both files re-parsed with THIS parser —
+# working-docs/collision_audit_2026-07-16.log). Expected-STABLE: incremental runs add
+# non-colliding files and leave this untouched. A deviation = a NEW same-object_id re-ship
+# ARRIVED (the rare event) → investigate + parse-compare the newcomer; do NOT assume benign.
+# ⚠ DELIBERATE-CHANGE-ONLY baseline: move this number ONLY by a considered human decision after
+# inspecting WHY the collision universe changed — NEVER bump it reflexively to silence the warning.
+# The tripwire's entire value depends on this constant not decaying into muted noise.
+EXPECTED_COLLISION_OIDS = 93_148
 
 COLUMNS = [
     "object_id", "ein", "org_name", "state", "tax_year", "tax_period_end",
@@ -50,6 +64,49 @@ COLUMNS = [
     "net_assets_eoy",
     # §2 Deliverable A new fields (Phase-1 dev port):
     "total_functional_expenses", "return_version", "contractors_over_100k_cnt",
+    # Canonical-filing layer Phase-1 (2026-07-06, ratified 2026-07-05): the recency-key
+    # inputs. object_id is release-batch order, NOT recency (measured ~24% wrong-pick on
+    # multi-filing groups) — selection precedence is amended_return > return_ts >
+    # object_id (determinism only). Backfilled over the existing corpus by
+    # backfill_canonical_cols.py, which imports extract_canonical_header_fields below.
+    "amended_return", "return_ts",
+    # #306/#299 store-both phase 1 (2026-07-11, D-spec addendum BUILD SCOPE):
+    # RAW as-filed name lines + granular rule label (+street flag), plus the
+    # group-exemption fields read in the same parse. org_name above stays
+    # LEGACY (line1-only) until the flip; joining lives in name_rules then.
+    # Backfilled over the existing corpus by backfill_name_cols.py, which
+    # imports extract_name_and_group_fields below (one implementation).
+    "name_line1", "name_line2", "name_rule_class", "name_street_suffix",
+    "group_exemption_num", "group_return_for_affiliates_ind",
+    "all_affiliates_included_ind",
+    # Band-1 remainder §A (manifest §A as amended 2026-07-18; ported from
+    # dev_extract_band1_remainder.py 2026-07-19, port-equivalence receipts in
+    # working-docs). Part I summary scalars + Part III mission + item-F
+    # principal officer, Form 990 only (NULL for EZ/PF/T). The manifest draft's
+    # group_return_ind is deliberately NOT here: GroupReturnForAffiliatesInd
+    # already lands as group_return_for_affiliates_ind above (store-both
+    # phase 1) — a second column would duplicate the same element.
+    "voting_members_cnt", "voting_members_independent_cnt",
+    "total_employee_cnt", "total_volunteers_cnt", "gross_receipts",
+    "formation_year", "legal_domicile_state", "activity_or_mission_desc",
+    "mission_desc", "website", "principal_officer_name",
+]
+
+# Band-1 §A (name, declared type) — single list driving CREATE TABLE parity,
+# the existing-DB ALTER path in create_schema (same idiom as the PF scalars in
+# extract_990pf_detail.create_schema), and the canonical view refresh.
+BAND1_A_COLUMNS = [
+    ("voting_members_cnt", "INTEGER"),
+    ("voting_members_independent_cnt", "INTEGER"),
+    ("total_employee_cnt", "INTEGER"),
+    ("total_volunteers_cnt", "INTEGER"),
+    ("gross_receipts", "INTEGER"),
+    ("formation_year", "INTEGER"),
+    ("legal_domicile_state", "TEXT"),
+    ("activity_or_mission_desc", "TEXT"),
+    ("mission_desc", "TEXT"),
+    ("website", "TEXT"),
+    ("principal_officer_name", "TEXT"),
 ]
 
 INSERT_SQL = f"""
@@ -95,12 +152,116 @@ def create_schema(con):
             -- EXISTING DBs the land applies the equivalent `ALTER TABLE returns ADD COLUMN ... INTEGER`.
             total_functional_expenses  INTEGER,
             return_version             TEXT,
-            contractors_over_100k_cnt  INTEGER
+            contractors_over_100k_cnt  INTEGER,
+            -- Canonical-filing layer Phase-1 (2026-07-06). amended_return: 1 = the form
+            -- element carries AmendedReturnInd (checkbox present), 0 = XML parsed and the
+            -- checkbox is absent, NULL = unknown (parse error / no local XML at backfill).
+            -- return_ts: ReturnHeader/ReturnTs verbatim as filed (ISO-8601 with UTC offset).
+            amended_return             INTEGER,
+            return_ts                  TEXT,
+            -- #306/#299 store-both phase 1 (2026-07-11). name_line1/name_line2:
+            -- Filer BusinessNameLine1Txt/Line2Txt RAW as filed (byte-faithful —
+            -- never normalized here; the derive layer at the flip owns joining).
+            -- name_rule_class: name_rules.classify_line2 granular label (cached
+            -- convenience, re-derivable from l1/l2 alone; READ_ERR = backfill
+            -- could not read/parse the source XML). name_street_suffix:
+            -- street/suite token flag (labeled, never excluded — Amendment 1).
+            -- group_exemption_num: GEN as filed (TEXT — leading zeros are
+            -- significant, e.g. '0544'). *_ind: 1/0 from the true/false element,
+            -- NULL = element absent (or parse error / pre-backfill row).
+            name_line1                 TEXT,
+            name_line2                 TEXT,
+            name_rule_class            TEXT,
+            name_street_suffix         INTEGER,
+            group_exemption_num        TEXT,
+            group_return_for_affiliates_ind INTEGER,
+            all_affiliates_included_ind INTEGER,
+            -- Band-1 remainder §A (2026-07-19). Part I summary + Part III
+            -- mission + item-F principal officer; Form 990 only, NULL = not
+            -- reported (rule 3). formation_year / count outliers are stored
+            -- AS FILED (flag-class, never auto-corrected). On existing DBs
+            -- these are ALTER-added by create_schema from BAND1_A_COLUMNS.
+            voting_members_cnt             INTEGER,
+            voting_members_independent_cnt INTEGER,
+            total_employee_cnt             INTEGER,
+            total_volunteers_cnt           INTEGER,
+            gross_receipts                 INTEGER,
+            formation_year                 INTEGER,
+            legal_domicile_state           TEXT,
+            activity_or_mission_desc       TEXT,
+            mission_desc                   TEXT,
+            website                        TEXT,
+            principal_officer_name         TEXT
         );
         -- idx_ein removed 2026-04-11: subset of idx_returns_ein_type and idx_returns_ein_year_oid
         CREATE INDEX IF NOT EXISTS idx_return_type ON returns(return_type);
         CREATE INDEX IF NOT EXISTS idx_tax_year    ON returns(tax_year);
+
     """)
+    # Existing-DB path for the Band-1 §A columns (fresh builds get them from
+    # CREATE TABLE above; a pre-Band-1 DB gains them here, appended in
+    # BAND1_A_COLUMNS order so live PRAGMA order matches the view list below).
+    have = {r[1] for r in con.execute("PRAGMA table_info(returns)")}
+    for col, decl in BAND1_A_COLUMNS:
+        if col not in have:
+            con.execute(f"ALTER TABLE returns ADD COLUMN {col} {decl}")
+    _refresh_canonical_view(con)
+    con.commit()
+
+
+# Canonical-filing selection view (Phase-1, ratified 2026-07-05). One canonical
+# filing per (ein, tax_year, return_type) — per-TYPE, never across types.
+# Precedence: amended_return=1 > latest datetime(return_ts) > object_id
+# (determinism only; object_id is release-batch order, NOT recency).
+# Column list is EXPLICIT and ORDERED to match the live DB's PRAGMA order
+# (projects away the window rn); the canonical_selection harness invariant REDs
+# if returns gains a column this list lacks — adding a returns column REQUIRES
+# extending this list in the same change (the conscious refresh; Band-1 §A did
+# exactly that 2026-07-19). It names the FULL final master schema including the
+# 5 PF scalars that extract_990pf_detail ADD COLUMNs later — SQLite resolves
+# view columns at QUERY time, so on a fresh build the view exists early and
+# errors loud (never silently wrong) if queried before those ALTERs land.
+CANONICAL_VIEW_SQL = """CREATE VIEW canonical_returns AS
+        SELECT
+            object_id, ein, org_name, state, tax_year, tax_period_end,
+            return_type, ntee_code, total_revenue, total_expenses,
+            program_expenses, fundraising_expenses, management_expenses,
+            total_assets_eoy, officer_comp, source_file, parse_error,
+            contributions_received, dividends, interest_income,
+            net_gain_sale_assets, contributions_paid, fmv_assets_eoy,
+            net_assets_eoy, grants_payable_eoy, qualifying_distributions,
+            distributable_amount, min_investment_return, excess_distribution_cyov,
+            total_functional_expenses, return_version,
+            contractors_over_100k_cnt, amended_return, return_ts,
+            name_line1, name_line2, name_rule_class, name_street_suffix,
+            group_exemption_num, group_return_for_affiliates_ind,
+            all_affiliates_included_ind,
+            voting_members_cnt, voting_members_independent_cnt,
+            total_employee_cnt, total_volunteers_cnt, gross_receipts,
+            formation_year, legal_domicile_state, activity_or_mission_desc,
+            mission_desc, website, principal_officer_name
+        FROM (
+          SELECT r.*, ROW_NUMBER() OVER (
+            PARTITION BY ein, tax_year, return_type
+            ORDER BY (amended_return IS 1) DESC,
+                     COALESCE(datetime(return_ts),'') DESC,
+                     object_id DESC) AS rn
+          FROM returns r)
+        WHERE rn = 1"""
+
+
+def _refresh_canonical_view(con):
+    """Create canonical_returns, or recreate it when its stored definition
+    differs from CANONICAL_VIEW_SQL (i.e. the view predates a column add).
+    Compares sqlite_master's stored CREATE text — works on fresh DBs too,
+    where querying the view would error (PF scalars not yet ALTER-added)."""
+    stored = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='view' AND name='canonical_returns'"
+    ).fetchone()
+    if stored is not None and stored[0] == CANONICAL_VIEW_SQL:
+        return
+    con.execute("DROP VIEW IF EXISTS canonical_returns")
+    con.execute(CANONICAL_VIEW_SQL)
 
 
 # ── File Discovery ─────────────────────────────────────────────────────────
@@ -125,6 +286,33 @@ def discover_files(base_dir):
 
 def object_id_from_path(filepath):
     return os.path.basename(filepath).replace("_public.xml", "")
+
+
+def collision_census(all_files):
+    """Count the object_ids backed by >1 on-disk file — the silent-skip universe.
+
+    `object_id` is IRS's per-SUBMISSION identifier, so a same-object_id collision
+    can ONLY be the IRS re-serializing ONE submission across batches (the 2018/2020
+    TEOS_XML_CT1 re-exports). A genuine amendment gets a NEW object_id and does not
+    collide (verified 2026-07-15: EIN 421200523 / 592919630 TY2021 originals +
+    amendments carry distinct object_ids and changed revenue). Both silent-skip
+    sites — the todo-filter (already-in-DB) and `INSERT OR IGNORE` (within-run) —
+    drop exactly (n-1) rows per colliding object_id.
+
+    This OBSERVES and COUNTS every such drop; it does NOT change ingest behavior
+    (keep-first stands — "newest wins" is a maintainer ratification, queue TOP). Returns
+    (n_collision_oids, n_rows_dropped, {oid: [files]}).
+    """
+    counts = Counter(object_id_from_path(f) for f in all_files)
+    collision_oids = {oid for oid, n in counts.items() if n > 1}
+    n_dropped = sum(counts[oid] - 1 for oid in collision_oids)
+    coll_files = {}
+    if collision_oids:
+        for f in all_files:
+            oid = object_id_from_path(f)
+            if oid in collision_oids:
+                coll_files.setdefault(oid, []).append(f)
+    return len(collision_oids), n_dropped, coll_files
 
 
 def load_processed_ids(db_path):
@@ -154,6 +342,16 @@ def find_text(el, dotted_path):
     return node.text
 
 
+def full_biz_name(biz):
+    """BusinessName container element -> Line1 [+ Line2] under the #306/#299
+    rule — ONE implementation, name_rules.join_name (see that module's header
+    for the rule, its receipts, and the emission semantics)."""
+    if biz is None:
+        return None
+    return join_name(find_text(biz, "BusinessNameLine1Txt"),
+                     find_text(biz, "BusinessNameLine2Txt"))
+
+
 def first_text(el, *dotted_paths):
     """Return text of the first dotted-path that resolves to a non-None text.
 
@@ -179,6 +377,17 @@ def int_or_none(val):
             return int(float(val))
         except (ValueError, TypeError):
             return None
+
+
+def text_or_none(val):
+    """Band-1 §A TEXT normalization (witnessed dev semantics): strip; a
+    present-but-empty/whitespace element carries no content → NULL (rule-5
+    value-level pin). NOT for name_line1/name_line2 — those stay byte-faithful
+    (DO-NOT #1, raw_name_fidelity_gate)."""
+    if val is None:
+        return None
+    v = val.strip()
+    return v if v else None
 
 
 # ── Form-Specific Extractors ──────────────────────────────────────────────
@@ -257,6 +466,35 @@ def extract_990(root, row):
     if row["net_assets_eoy"] is None:
         row["net_assets_eoy"] = int_or_none(
             find_text(irs, "NetAssetsOrFundBalancesEOYAmt"))
+
+    # ── Band-1 remainder §A (manifest §A as amended 2026-07-18) ──────────────
+    # Part I summary scalars + Part III mission, flat under IRS990. Values are
+    # stored AS FILED (formation_year 9999-class, >1000 "boards" = flag-class,
+    # never auto-corrected). GroupReturnForAffiliatesInd is deliberately NOT
+    # read here — it already lands as group_return_for_affiliates_ind
+    # (extract_name_and_group_fields).
+    row["voting_members_cnt"] = int_or_none(find_text(irs, "VotingMembersGoverningBodyCnt"))
+    row["voting_members_independent_cnt"] = int_or_none(find_text(irs, "VotingMembersIndependentCnt"))
+    row["total_employee_cnt"] = int_or_none(find_text(irs, "TotalEmployeeCnt"))
+    row["total_volunteers_cnt"] = int_or_none(find_text(irs, "TotalVolunteersCnt"))
+    row["gross_receipts"] = int_or_none(find_text(irs, "GrossReceiptsAmt"))
+    row["formation_year"] = int_or_none(find_text(irs, "FormationYr"))
+    row["legal_domicile_state"] = text_or_none(find_text(irs, "LegalDomicileStateCd"))
+    row["activity_or_mission_desc"] = text_or_none(find_text(irs, "ActivityOrMissionDesc"))
+    row["mission_desc"] = text_or_none(find_text(irs, "MissionDesc"))
+    row["website"] = text_or_none(find_text(irs, "WebsiteAddressTxt"))
+
+    # principal_officer_name: item F. PersonNm carrier first; ~3.1% of filings
+    # carry the same line as a business name — value-level fallback (rule 5)
+    # via the sanctioned name_rules.join_name idiom. NEVER the ReturnHeader
+    # e-file signer (rule 4 — that is a different person; store NULL instead).
+    row["principal_officer_name"] = text_or_none(find_text(irs, "PrincipalOfficerNm"))
+    if row["principal_officer_name"] is None:
+        pob = irs.find(_tag("PrincipalOfcrBusinessName"))
+        if pob is not None:
+            row["principal_officer_name"] = join_name(
+                find_text(pob, "BusinessNameLine1Txt"),
+                find_text(pob, "BusinessNameLine2Txt"))
 
 
 def extract_990ez(root, row):
@@ -346,6 +584,88 @@ def extract_990t(root, row):
     row["total_assets_eoy"] = int_or_none(find_text(irs, "BookValueAssetsEOYAmt"))
 
 
+def extract_canonical_header_fields(root, row):
+    """Canonical-filing layer Phase-1: read the recency-key inputs, fully anchored.
+
+    return_ts       ReturnHeader/ReturnTs — direct child of ReturnHeader in every
+                    processing year 2017-2026 (verified on real filings 2026-07-06).
+                    Stored verbatim as filed.
+    amended_return  ReturnData/IRS<return_type>/AmendedReturnInd — a direct child of
+                    the form element in ALL sampled amended filings across all 10
+                    processing years and all 4 form types (250-file census 2026-07-06;
+                    never appears deeper, so no bare .// descent that could mis-anchor
+                    on a schedule-level element). Presence of the element = amended
+                    (same measurement as the Phase-0 ground-truth probe). 0 requires
+                    the form element to be present-and-checked; if ReturnData or the
+                    form element is missing, the flag stays NULL (unknown), never 0.
+
+    Called by parse_file() on the monthly path and IMPORTED by
+    backfill_canonical_cols.py — one implementation, no drift.
+    """
+    row["return_ts"] = find_text(root, "ReturnHeader.ReturnTs")
+    return_type = row.get("return_type")
+    if not return_type:
+        return
+    return_data = root.find(_tag("ReturnData"))
+    if return_data is None:
+        return
+    form = return_data.find(_tag(f"IRS{return_type}"))
+    if form is None:
+        return
+    row["amended_return"] = 1 if form.find(_tag("AmendedReturnInd")) is not None else 0
+
+
+def _ind_01(txt):
+    """MeF boolean/checkbox element text -> 1/0/NULL (absent or unrecognized)."""
+    if txt is None:
+        return None
+    t = txt.strip().lower()
+    if t in ("true", "1", "x"):
+        return 1
+    if t in ("false", "0"):
+        return 0
+    return None
+
+
+def extract_name_and_group_fields(root, row):
+    """#306/#299 store-both phase 1 (D-spec addendum BUILD SCOPE, 2026-07-11).
+
+    name_line1/name_line2: Filer BusinessNameLine1Txt/Line2Txt element text
+    VERBATIM — deliberately NOT routed through full_biz_name/join_name (DO-NOT
+    #1: those normalize; joining is org_name's job — DONE at the flip, maintainer-GO
+    2026-07-15). org_name above = the join; name_line1/name_line2 stay verbatim.
+
+    name_rule_class/name_street_suffix: name_rules.classify_line2 on the raw
+    pair — a cached convenience, re-derivable from the stored columns alone.
+
+    Group-exemption fields (round-9 probe 2026-07-11): direct children of the
+    form element (IRS990/IRS990EZ carry them; PF/T do not), anchored exactly
+    like extract_canonical_header_fields above — no bare .// descent.
+    GroupExemptionNum stays TEXT (leading zeros significant, e.g. '0544').
+
+    Called by parse_file() on the monthly path and IMPORTED by
+    backfill_name_cols.py (backfill_newcols doctrine: one implementation, the
+    backfill cannot drift from what the monthly writes going forward).
+    """
+    row["name_line1"] = find_text(root, "ReturnHeader.Filer.BusinessName.BusinessNameLine1Txt")
+    row["name_line2"] = find_text(root, "ReturnHeader.Filer.BusinessName.BusinessNameLine2Txt")
+    cls, street = classify_line2(row["name_line1"], row["name_line2"])
+    row["name_rule_class"] = cls
+    row["name_street_suffix"] = street
+    return_type = row.get("return_type")
+    if not return_type:
+        return
+    return_data = root.find(_tag("ReturnData"))
+    if return_data is None:
+        return
+    form = return_data.find(_tag(f"IRS{return_type}"))
+    if form is None:
+        return
+    row["group_exemption_num"] = find_text(form, "GroupExemptionNum")
+    row["group_return_for_affiliates_ind"] = _ind_01(find_text(form, "GroupReturnForAffiliatesInd"))
+    row["all_affiliates_included_ind"] = _ind_01(find_text(form, "AllAffiliatesIncludedInd"))
+
+
 # ── Main File Parser ──────────────────────────────────────────────────────
 EXTRACTORS = {
     "990": extract_990,
@@ -368,9 +688,23 @@ def parse_file(filepath):
         return_type = find_text(root, "ReturnHeader.ReturnTypeCd")
         row["return_type"] = return_type
         row["ein"] = find_text(root, "ReturnHeader.Filer.EIN")
-        row["org_name"] = find_text(root, "ReturnHeader.Filer.BusinessName.BusinessNameLine1Txt")
+        # #306/#299 FLIP (maintainer-GO 2026-07-15): org_name = Line1 [+ Line2] via the
+        # single rule name_rules.join_name (bare-CO carve merged into that module).
+        # DO-NOT #2 (legacy line1-only) is now LIFTED. Existing rows were folded by
+        # backfill_org_name_flip.py using the SAME join_name over stored name_line1/
+        # name_line2 — provably identical to this parse-time emission.
+        row["org_name"] = join_name(
+            find_text(root, "ReturnHeader.Filer.BusinessName.BusinessNameLine1Txt"),
+            find_text(root, "ReturnHeader.Filer.BusinessName.BusinessNameLine2Txt"))
         row["tax_year"] = int_or_none(find_text(root, "ReturnHeader.TaxYr"))
         row["tax_period_end"] = find_text(root, "ReturnHeader.TaxPeriodEndDt")
+
+        # Canonical-filing layer Phase-1: recency-key inputs (needs return_type, set above)
+        extract_canonical_header_fields(root, row)
+
+        # #306/#299 store-both phase 1: raw l1/l2 + rule label + group-exemption
+        # fields, ALONGSIDE the untouched legacy org_name above (needs return_type)
+        extract_name_and_group_fields(root, row)
 
         # State from USAddress, NULL for foreign orgs
         filer = root.find(f".//{_tag('ReturnHeader')}/{_tag('Filer')}")
@@ -506,6 +840,13 @@ def _flush(con, buffer):
 
 # ── Main ──────────────────────────────────────────────────────────────────
 def main():
+    # Corpus write-lock seam gate (completeness spec §0.12): delegated under
+    # update.sh's lock via CORPUS_LOCK_TOKEN_990; standalone runs acquire
+    # (auto-release at exit); any other holder = hard stop, never a warning.
+    sys.path.insert(0, "/mnt/data/datadawn/tools")
+    from corpus_lock import gate as _corpus_gate
+    _corpus_gate("990", intent="extract_990.py (returns ingest)")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -525,6 +866,32 @@ def main():
     logging.info("Discovering files...")
     all_files = discover_files(BASE_DIR)
     logging.info(f"Found {len(all_files):,} XML files")
+
+    # Collision census (queue-TOP silent-skip visibility, 2026-07-15): count + list
+    # every object_id backed by >1 on-disk file BEFORE the todo-filter and
+    # INSERT OR IGNORE silently drop the extras. Turns "silent row loss" into an
+    # observed, logged fact. See collision_census() docstring. Ingest unchanged.
+    n_coll, n_dropped, coll_files = collision_census(all_files)
+    logging.info(
+        f"Collision census: {n_coll:,} object_id(s) backed by >1 on-disk file; "
+        f"{n_dropped:,} row(s) dropped by object_id dedup (keep-first)."
+    )
+    # Forward tripwire (#4): baseline is 93,148 clean 2-way pairs (extinct 2018+2020 TEOS
+    # events). A count off the baseline, or any oid gaining a 3rd file, means a NEW re-ship
+    # arrived — the rare event worth reacting to (parse+compare the delta), never auto-benign.
+    max_mult = max((len(fs) for fs in coll_files.values()), default=0)
+    if n_coll != EXPECTED_COLLISION_OIDS or max_mult > 2:
+        logging.warning(
+            f"COLLISION BASELINE DEVIATION: expected {EXPECTED_COLLISION_OIDS:,} clean 2-way "
+            f"pairs, got {n_coll:,} colliding oids (max files/oid={max_mult}). A new "
+            f"same-object_id re-ship arrived — parse+compare the delta before trusting it."
+        )
+    if coll_files:
+        census_path = os.path.join(BASE_DIR, "collision_census.txt")
+        with open(census_path, "w") as fh:
+            for oid in sorted(coll_files):
+                fh.write(f"{oid}\t{len(coll_files[oid])}\t{'|'.join(coll_files[oid])}\n")
+        logging.info(f"  → colliding object_ids listed in {census_path}")
 
     logging.info("Loading already-processed IDs...")
     processed_ids = load_processed_ids(DB_PATH)

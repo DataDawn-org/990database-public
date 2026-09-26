@@ -963,22 +963,390 @@ def newfields_witnesses(conn, log=print, artifact=None) -> bool:
     return green
 
 
+def canonical_selection(conn, log=print) -> bool:
+    """Canonical-filing layer invariants (Phase-1, built 2026-07-06; ratified 2026-07-05).
+    Fail-closed on any of:
+      (1) canonical_returns view absent, or its column set != returns' columns — the
+          view projects an EXPLICIT column list, so a returns column added without
+          recreating the view silently vanishes from every canonical consumer; RED
+          forces the conscious refresh (Band-1 expansion will hit this on purpose);
+      (2) partition violation: >1 canonical row per (ein, tax_year, return_type), or a
+          returns partition with NO canonical row. A cross-TYPE second canonical is a
+          legitimate dual-filer, NOT a defect — the partition key includes return_type,
+          so this check structurally cannot fire on it;
+      (3) domain: amended_return outside {0,1,NULL}, or a non-NULL return_ts that
+          datetime() cannot parse (the ts tier orders by UTC-normalized datetime());
+      (4) grain precondition: blank/NULL-ein rows (SQL grouping would merge them into
+          one partition and suppress real filings — 0 such rows today; if one ever
+          appears a conscious grain decision is owed, not a silent self-partition);
+      (5) canonical_filings (the materialized set, update.sh Step 3d) absent or
+          differing from the view in either direction — the stale-pick hazard; this
+          re-asserts Step 3d's parity at the validate-before-deploy gate."""
+    green = True
+    # NOT _table_exists(): that helper filters type='table' and canonical_returns is a VIEW
+    view_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name='canonical_returns'"
+    ).fetchone() is not None
+    if not view_exists:
+        log("GATE_CANON_RED: canonical_returns view absent (fail-closed — consumers "
+            "reference it; a post-Phase-1 DB without the view cannot serve)")
+        return False
+    rcols = [r[1] for r in conn.execute("PRAGMA table_info(returns)")]
+    vcols = [d[0] for d in conn.execute("SELECT * FROM canonical_returns LIMIT 0").description]
+    if rcols != vcols:
+        log(f"GATE_CANON_RED: canonical_returns columns != returns columns "
+            f"(missing from view: {sorted(set(rcols)-set(vcols))}; extra: "
+            f"{sorted(set(vcols)-set(rcols))}) — recreate the view with the full list")
+        green = False
+    dup = conn.execute("""SELECT COUNT(*) FROM (SELECT 1 FROM canonical_returns
+        GROUP BY ein, tax_year, return_type HAVING COUNT(*)>1)""").fetchone()[0]
+    nparts = conn.execute("""SELECT COUNT(*) FROM (SELECT DISTINCT ein, tax_year, return_type
+        FROM returns)""").fetchone()[0]
+    ncanon = conn.execute("SELECT COUNT(*) FROM canonical_returns").fetchone()[0]
+    if dup or ncanon != nparts:
+        log(f"GATE_CANON_RED: partition violation — dual-canonical partitions {dup}, "
+            f"canonical rows {ncanon:,} vs distinct partitions {nparts:,}")
+        green = False
+    baddom = conn.execute("""SELECT
+        SUM(CASE WHEN amended_return IS NOT NULL AND amended_return NOT IN (0,1) THEN 1 ELSE 0 END),
+        SUM(CASE WHEN return_ts IS NOT NULL AND datetime(return_ts) IS NULL THEN 1 ELSE 0 END)
+        FROM returns""").fetchone()
+    if (baddom[0] or 0) or (baddom[1] or 0):
+        log(f"GATE_CANON_RED: domain violation — amended_return outside {{0,1,NULL}}: "
+            f"{baddom[0] or 0}; unparseable return_ts: {baddom[1] or 0}")
+        green = False
+    blank = conn.execute(
+        "SELECT COUNT(*) FROM returns WHERE TRIM(COALESCE(ein,''))=''").fetchone()[0]
+    if blank:
+        log(f"GATE_CANON_RED: {blank} blank/NULL-ein rows — the per-type partition grain "
+            "presumes real EINs; decide their grain consciously before trusting selection")
+        green = False
+    if not _table_exists(conn, "canonical_filings"):
+        log("GATE_CANON_RED: canonical_filings (materialized set) absent — Step 3d "
+            "refresh never ran on this DB")
+        green = False
+    else:
+        delta = conn.execute("""SELECT
+            (SELECT COUNT(*) FROM (SELECT object_id FROM canonical_filings
+             EXCEPT SELECT object_id FROM canonical_returns)) +
+            (SELECT COUNT(*) FROM (SELECT object_id FROM canonical_returns
+             EXCEPT SELECT object_id FROM canonical_filings))""").fetchone()[0]
+        if delta:
+            log(f"GATE_CANON_RED: canonical_filings differs from the view (delta={delta}) "
+                "— STALE materialized set; corpus-scale surfaces would serve superseded "
+                "filings")
+            green = False
+    if green:
+        log(f"GATE_CANON_OK: one canonical per partition ({ncanon:,} = {nparts:,} "
+            "partitions), view columns match returns, domain clean, materialized set "
+            "in exact parity")
+    return green
+
+
+def canonical_witnesses_invariant(conn, log=print) -> bool:
+    """W1-W7 red-then-green witness suite (canonical_witnesses.py) — pinned real
+    filings, one per precedence tier + controls + both aggregate paths. W7 runs in
+    green (post-builder-fix) mode; on source_file-scrubbed public DBs it skips loudly
+    inside the suite (enforced on master pre-copy)."""
+    import canonical_witnesses
+    return canonical_witnesses.run_all(conn, log=log, w7_mode="green")
+
+
+# ── Band-1 remainder registration (manifest §A/§B/§C + §G; ported 2026-07-19) ─
+# HAND-DECLARED literals, deliberately independent of the extractor modules —
+# the declaration boundary must not move when the code under test changes.
+BAND1_RETURNS_COLS = [
+    "voting_members_cnt", "voting_members_independent_cnt",
+    "total_employee_cnt", "total_volunteers_cnt", "gross_receipts",
+    "formation_year", "legal_domicile_state", "activity_or_mission_desc",
+    "mission_desc", "website", "principal_officer_name",
+]
+BAND1_GOVERNANCE_COLS = [
+    "conflict_of_interest_policy_ind", "coi_annual_disclosure_ind",
+    "coi_regular_monitoring_ind", "whistleblower_policy_ind",
+    "document_retention_policy_ind", "comp_process_ceo_ind",
+    "comp_process_other_ind", "family_or_business_rln_ind",
+    "material_diversion_ind", "form990_provided_to_board_ind",
+    "governing_body_voting_members_cnt", "independent_voting_members_cnt",
+    "delegation_of_mgmt_duties_ind", "minutes_of_governing_body_ind",
+]
+BAND1_CHECKLIST_COLS = [
+    "described_in_section_501c3_ind", "schedule_b_required_ind",
+    "political_campaign_acty_ind", "lobbying_activities_ind",
+    "subject_to_proxy_tax_ind", "donor_advised_fund_ind",
+    "conservation_easements_ind", "collections_of_art_ind",
+    "credit_counseling_ind", "donor_rstr_or_quasi_endowments_ind",
+    "report_land_building_equipment_ind", "report_investments_other_sec_ind",
+    "report_program_related_invst_ind", "report_other_assets_ind",
+    "report_other_liabilities_ind", "include_fin48_footnote_ind",
+    "independent_audit_fincl_stmt_ind", "consolidated_audit_fincl_stmt_ind",
+    "school_operating_ind", "foreign_office_ind", "foreign_activities_ind",
+    "more_than_5000k_to_org_ind", "more_than_5000k_to_individuals_ind",
+    "professional_fundraising_ind", "fundraising_activities_ind",
+    "gaming_activities_ind", "operate_hospital_ind",
+    "audited_financial_stmt_att_ind", "grants_to_organizations_ind",
+    "grants_to_individuals_ind", "schedule_j_required_ind",
+    "tax_exempt_bonds_ind", "invest_tax_exempt_bonds_ind",
+    "escrow_account_ind", "on_behalf_of_issuer_ind",
+    "engaged_in_excess_benefit_trans_ind", "py_excess_benefit_trans_ind",
+    "loan_outstanding_ind", "grant_to_related_person_ind",
+    "business_rln_with_org_mem_ind", "business_rln_with_fam_mem_ind",
+    "business_rln_with_35_ctrl_ent_ind", "deductible_non_cash_contri_ind",
+    "deductible_art_contribution_ind", "terminate_operations_ind",
+    "partial_liquidation_ind", "disregarded_entity_ind", "related_entity_ind",
+    "related_organization_ctrl_ent_ind", "transaction_with_control_ent_ind",
+    "trnsfr_exmpt_non_chrtbl_rltd_org_ind", "activities_conducted_prtshp_ind",
+    "schedule_o_required_ind",
+]
+assert len(BAND1_CHECKLIST_COLS) == 53 and len(BAND1_GOVERNANCE_COLS) == 14
+
+# Part I L3/L4 ↔ Part VI L1a/L1b cross-tie agreement floor. CALIBRATED at 75K
+# (Stage-2 receipt 2026-07-18: 99.988% each pair; 5K: 99.98%). Band ≥99.5%,
+# flag-not-fail: mismatches inside the band are logged (filer-side
+# inconsistency, brief §2 flagged-never-absorbed), never per-record gated.
+# A tag swap would correlate massively and crater the rate → RED.
+BAND1_CROSSTIE_FLOOR = 0.995
+# independent_cnt > total_cnt (Part I pair) violation-rate ceiling. This is a
+# FILER-controlled relationship with an endemic error floor (classify-not-gate):
+# measured on the Stage-2 75K scratch 2026-07-19 — cumulative 524/75,000
+# (0.699%), per-tax-year worst 0.862% (n≥5,000 years; range 0.47–0.86%),
+# small-cohort max 1.07% (TY2025, n=1,496). Ceiling 1.5% clears every observed
+# point with ~1.7× margin; a systematic parse bug (e.g. swapped columns) sends
+# the rate toward 50%+ and REDs. Drift-ceil family, NOT rule-of-three.
+BAND1_VOTING_TIE_CEIL = 0.015
+# Fraction of return_type='990' rows carrying a governance/checklist row.
+# SCOPE (lead ruling 2026-07-19): this is completeness over the PARSED 990
+# population — returns rows exist because their XML was present locally and
+# ingested — explicitly NOT "fraction of all 990s ever filed". Unheld/never-
+# served filings (the 2026-07-12 census's 164,936) have no returns row and
+# sit outside this denominator by construction; never quote 1.0 as "every
+# 990 filing is present."
+# FLIPPED to 1.0 = C − ε (lead ratification 2026-07-19; was measure-then-flip
+# None). Stage 3 measured C = 1.000000, ε = 0: presence 2,879,930/2,879,930
+# in EVERY year cohort, zero stored parse errors any year, zero no-IRS990 at
+# full-TY2023 year scale (receipts working-docs/
+# band1_stage3_coverage_2026-07-19.md). The earlier "unserved-XML bounds it
+# below 1.0" premise DISSOLVED under the pinned denominator. At 1.0, any 990
+# row lacking its §B/§C pair REDs — loud abort over a silent tolerance
+# budget, ratified.
+BAND1_COVERAGE_FLOOR = 1.0
+
+
+def band1_reconciliation(conn, log=print) -> bool:
+    """Band-1 remainder in-DB invariants (manifest §G): presence, per-oid
+    uniqueness (the delete-then-insert contract), §B/§C paired-write parity,
+    population/orphan hygiene, boolean domain, the Part I↔Part VI cross-tie
+    band, and the Part-I voting-tie violation ceiling. RED on absent column /
+    empty landing / rate collapse (fail-closed)."""
+    green = True
+    # tax_year/return_type ride the presence check: the voting-tie per-year leg
+    # reads them, and a DB degenerate enough to lack them must RED, not raise.
+    need_a = _missing(conn, "returns", BAND1_RETURNS_COLS + ["tax_year", "return_type"])
+    need_b = (_missing(conn, "returns_governance", BAND1_GOVERNANCE_COLS)
+              if _table_exists(conn, "returns_governance") else BAND1_GOVERNANCE_COLS)
+    need_c = (_missing(conn, "returns_checklist", BAND1_CHECKLIST_COLS)
+              if _table_exists(conn, "returns_checklist") else BAND1_CHECKLIST_COLS)
+    if need_a or need_b or need_c:
+        log(f"GATE_BAND1_RED: columns/tables absent — returns:{need_a} "
+            f"governance:{need_b[:3]}{'…' if len(need_b) > 3 else ''} "
+            f"checklist:{need_c[:3]}{'…' if len(need_c) > 3 else ''} "
+            "(fail-closed; slice not landed on this DB)")
+        return False
+    n990 = conn.execute("SELECT COUNT(*) FROM returns WHERE return_type='990'").fetchone()[0]
+    ngov = conn.execute("SELECT COUNT(*) FROM returns_governance").fetchone()[0]
+    nchk = conn.execute("SELECT COUNT(*) FROM returns_checklist").fetchone()[0]
+    if ngov == 0 or nchk == 0 or n990 == 0:
+        log(f"GATE_BAND1_RED: empty landing — 990 rows {n990:,}, governance {ngov:,}, "
+            f"checklist {nchk:,} (fail-closed; tables exist but certify nothing)")
+        return False
+    if ngov != nchk:
+        log(f"GATE_BAND1_RED: §B/§C paired-write parity broken — governance {ngov:,} != "
+            f"checklist {nchk:,} (the writer emits both or neither per filing)")
+        green = False
+    for t in ("returns_governance", "returns_checklist"):
+        dups = conn.execute(
+            f"SELECT COUNT(*) FROM (SELECT 1 FROM {t} GROUP BY object_id HAVING COUNT(*)>1)"
+        ).fetchone()[0]
+        if dups:
+            log(f"GATE_BAND1_RED: {dups:,} object_ids with >1 row in {t} — the per-oid "
+                "DELETE-then-INSERT contract is broken (re-run accumulation)")
+            green = False
+        orphans = conn.execute(
+            f"""SELECT COUNT(*) FROM {t} x LEFT JOIN returns r ON r.object_id=x.object_id
+                WHERE r.return_type IS NULL OR r.return_type != '990'"""
+        ).fetchone()[0]
+        if orphans:
+            log(f"GATE_BAND1_RED: {orphans:,} {t} rows are ORPHAN/out-of-scope — Part IV/VI "
+                "exist only on Form 990 (population leak)")
+            green = False
+    # Coverage vs the 990 universe — MEASURE-THEN-FLIP (fail-closed while None).
+    cov = ngov / n990
+    if BAND1_COVERAGE_FLOOR is None:
+        log(f"GATE_BAND1_RED: BAND1_COVERAGE_FLOOR is None — governance-coverage "
+            f"{ngov:,}/{n990:,} = {cov:.5f} here. The floor was RATIFIED 1.0 on "
+            "2026-07-19 (Stage-3 receipts); None now means an unratified revert "
+            "(fail-closed)")
+        green = False
+    elif cov < BAND1_COVERAGE_FLOOR:
+        log(f"GATE_BAND1_RED: governance coverage {cov:.5f} ({ngov:,}/{n990:,}) < floor "
+            f"{BAND1_COVERAGE_FLOOR} — 990 filings parsed without their §B/§C rows landing")
+        green = False
+    # Boolean domain: every §B/§C indicator ∈ {0,1,NULL} (rule 2/3).
+    b_bools = [c for c in BAND1_GOVERNANCE_COLS if c.endswith("_ind")]
+    for t, cols in (("returns_governance", b_bools),
+                    ("returns_checklist", BAND1_CHECKLIST_COLS)):
+        expr = " + ".join(
+            f"SUM(CASE WHEN {c} IS NOT NULL AND {c} NOT IN (0,1) THEN 1 ELSE 0 END)"
+            for c in cols)
+        bad = conn.execute(f"SELECT {expr} FROM {t}").fetchone()[0] or 0
+        if bad:
+            log(f"GATE_BAND1_RED: {bad:,} values outside {{0,1,NULL}} across {t} "
+                "indicator columns — boolean normalization broke (rule 2)")
+            green = False
+    # Part I ↔ Part VI cross-tie band (flag-not-fail: rate gates, rows are flags).
+    for a_col, b_col, line in (
+            ("voting_members_cnt", "governing_body_voting_members_cnt", "L3↔L1a"),
+            ("voting_members_independent_cnt", "independent_voting_members_cnt", "L4↔L1b")):
+        n, agree = conn.execute(
+            f"""SELECT COUNT(*), SUM(CASE WHEN r.{a_col} = g.{b_col} THEN 1 ELSE 0 END)
+                FROM returns r JOIN returns_governance g ON g.object_id = r.object_id
+                WHERE r.{a_col} IS NOT NULL AND g.{b_col} IS NOT NULL"""
+        ).fetchone()
+        n, agree = (n or 0), (agree or 0)
+        if n == 0:
+            log(f"GATE_BAND1_RED: cross-tie {line} — 0 evaluable pairs (fail-closed)")
+            green = False
+            continue
+        rate = agree / n
+        if rate < BAND1_CROSSTIE_FLOOR:
+            log(f"GATE_BAND1_RED: cross-tie {line} agreement {rate:.5f} < band "
+                f"{BAND1_CROSSTIE_FLOOR} over {n:,} — correlated divergence (tag swap / "
+                "systematic parse drift), not scattered filer inconsistency")
+            green = False
+        else:
+            log(f"GATE_BAND1_NOTE: cross-tie {line} {rate:.5f} over {n:,} "
+                f"({n-agree:,} filer-side mismatches — flagged, never absorbed)")
+    # Part-I voting-tie violation ceiling (endemic filer-error floor ~0.7%).
+    rows = conn.execute(
+        """SELECT tax_year, COUNT(*),
+                  SUM(CASE WHEN voting_members_independent_cnt > voting_members_cnt
+                           THEN 1 ELSE 0 END)
+           FROM returns WHERE return_type='990'
+             AND voting_members_cnt IS NOT NULL
+             AND voting_members_independent_cnt IS NOT NULL
+           GROUP BY tax_year"""
+    ).fetchall()
+    tot_n = sum(r[1] for r in rows)
+    tot_v = sum(r[2] or 0 for r in rows)
+    if tot_n == 0:
+        log("GATE_BAND1_RED: voting-tie — 0 evaluable rows (fail-closed)")
+        green = False
+    else:
+        if tot_v / tot_n > BAND1_VOTING_TIE_CEIL:
+            log(f"GATE_BAND1_RED: voting-tie violations {tot_v:,}/{tot_n:,} "
+                f"({tot_v/tot_n:.5f}) > ceiling {BAND1_VOTING_TIE_CEIL} — above the "
+                "endemic filer-error floor (swapped/mis-read columns, not filer noise)")
+            green = False
+        for yr, n, v in rows:
+            v = v or 0
+            if n >= 1000 and v / n > BAND1_VOTING_TIE_CEIL:
+                log(f"GATE_BAND1_RED: voting-tie TY{yr} {v:,}/{n:,} ({v/n:.5f}) > ceiling "
+                    f"{BAND1_VOTING_TIE_CEIL} (per-year leg — a single-era break must not "
+                    "dilute into the cumulative rate)")
+                green = False
+    if green:
+        log(f"GATE_BAND1_GREEN: presence/uniqueness/parity/domain/cross-tie/voting-tie "
+            f"clean over {ngov:,} governance + {nchk:,} checklist rows")
+    return green
+
+
+BAND1_WITNESS_DIR = Path(__file__).resolve().parent / "working-docs" / "band1_witness_fixtures_2026-07-18"
+
+
+def band1_witnesses(conn, log=print) -> bool:
+    """Band-1 witness suite pointer: the 10-filing golden set (two independent
+    machine legs 790/790 + third pinned-rule oracle; maintainer attestation
+    2026-07-19, ATTESTATION.md) re-asserted against THIS DB. Fail-closed on a
+    missing artifact, missing attestation, or any value drift. The manifest
+    draft's group_return_ind maps to the landed group_return_for_affiliates_ind
+    (same element; §A amendment 2026-07-19)."""
+    import json
+    att = BAND1_WITNESS_DIR / "ATTESTATION.md"
+    exp_path = BAND1_WITNESS_DIR / "expected_stored_independent.json"
+    if not att.exists():
+        log("GATE_B1WIT_RED: ATTESTATION.md absent — the human sign is part of the "
+            "artifact (witness-artifact convention); fail-closed")
+        return False
+    try:
+        expected = json.loads(exp_path.read_text())
+    except Exception as e:
+        log(f"GATE_B1WIT_RED: cannot load {exp_path.name}: {e} (fail-closed)")
+        return False
+    col_map = {"group_return_ind": "group_return_for_affiliates_ind"}
+    green = True
+    checks = 0
+    for oid, tables in expected.items():
+        for table, cols in tables.items():
+            if not _table_exists(conn, table) and table != "returns":
+                log(f"GATE_B1WIT_RED: table {table} absent — can't witness {oid} (fail-closed)")
+                green = False
+                continue
+            for col, want in cols.items():
+                db_col = col_map.get(col, col)
+                if db_col not in _columns(conn, table):
+                    log(f"GATE_B1WIT_RED: {table}.{db_col} absent — can't witness {oid}")
+                    green = False
+                    continue
+                rows = conn.execute(
+                    f"SELECT {db_col} FROM {table} WHERE object_id=?", (oid,)).fetchall()
+                if not rows:
+                    log(f"GATE_B1WIT_RED: witness {oid} has no row in {table} (fail-closed)")
+                    green = False
+                    continue
+                got = rows[0][0]
+                checks += 1
+                if got != want:
+                    log(f"GATE_B1WIT_RED: {oid} {table}.{db_col} parser={got!r} != "
+                        f"golden {want!r} (independent-transcription oracle)")
+                    green = False
+    if green:
+        log(f"GATE_B1WIT_GREEN: {checks} golden checks match (10-filing attested set, "
+            f"signoff {att.name} 2026-07-19)")
+    return green
+
+
 # Declaration-boundary defense (manifest §G): every expansion column that EXISTS must
 # map to a covering invariant or sit on the short, justified allowlist; an existing
 # UNCOVERED column REDs — turns a silent omission into a fail-closed refusal.
 _EXPANSION_COLUMNS = {
-    "returns": ["total_functional_expenses", "contractors_over_100k_cnt", "return_version"],
+    "returns": ["total_functional_expenses", "contractors_over_100k_cnt", "return_version",
+                "amended_return", "return_ts", *BAND1_RETURNS_COLS],
     "officers": ["is_highest_compensated_employee"],
-    # B's columns (returns_governance/_checklist, the 5 role flags, Part-I summary)
-    # get added here when B is decided — each then needs a covering invariant or an
-    # allowlist entry, or this guard REDs.
+    # Band-1 remainder §B/§C landed 2026-07-19 (returns_governance/_checklist).
+    # STILL PENDING here: the 5 remaining role flags (§D) — added when that
+    # slice lands; each then needs a covering invariant or an allowlist entry.
+    "returns_governance": ["object_id", "ein", *BAND1_GOVERNANCE_COLS],
+    "returns_checklist": ["object_id", "ein", *BAND1_CHECKLIST_COLS],
 }
 _COLUMN_COVERAGE = {  # column -> the registered invariant that validates it
     "total_functional_expenses": "newfields_reconciliation",
     "contractors_over_100k_cnt": "newfields_reconciliation",
     "is_highest_compensated_employee": "newfields_reconciliation",
     "return_version": "return_version_integrity",
+    "amended_return": "canonical_selection",
+    "return_ts": "canonical_selection",
 }
+# Band-1 remainder coverage (2026-07-19): the voting pair is validated by the
+# reconciliation ties; the other 9 §A scalars by the attested golden set; the
+# §B/§C tables (incl. their object_id/ein keys — dup/orphan legs) by
+# reconciliation. Witness values additionally cover §B/§C — one primary
+# invariant per column here, by what genuinely validates it.
+_COLUMN_COVERAGE.update({c: "band1_reconciliation" for c in
+                         ("voting_members_cnt", "voting_members_independent_cnt")})
+_COLUMN_COVERAGE.update({c: "band1_witnesses" for c in BAND1_RETURNS_COLS
+                         if c not in ("voting_members_cnt", "voting_members_independent_cnt")})
+_COLUMN_COVERAGE.update({c: "band1_reconciliation" for c in
+                         ("object_id", "ein", *BAND1_GOVERNANCE_COLS, *BAND1_CHECKLIST_COLS)})
 _DRIFT_ALLOWLIST: set = set()  # intentionally-unguarded columns — KEEP SHORT, justify each
 
 # AFFINITY — the type check, RELOCATED to the schema (green-pass §3, 2026-06-28). The witness value-
@@ -988,8 +1356,18 @@ _DRIFT_ALLOWLIST: set = set()  # intentionally-unguarded columns — KEEP SHORT,
 # stores strings uncoerced — this REDs it at the schema boundary, where the bug actually lives.
 _EXPANSION_AFFINITY = {
     "returns": {"total_functional_expenses": "INTEGER", "contractors_over_100k_cnt": "INTEGER",
-                "return_version": "TEXT"},
+                "return_version": "TEXT", "amended_return": "INTEGER", "return_ts": "TEXT",
+                # Band-1 §A (2026-07-19): 6 INT counts/amounts + 5 TEXT
+                "voting_members_cnt": "INTEGER", "voting_members_independent_cnt": "INTEGER",
+                "total_employee_cnt": "INTEGER", "total_volunteers_cnt": "INTEGER",
+                "gross_receipts": "INTEGER", "formation_year": "INTEGER",
+                "legal_domicile_state": "TEXT", "activity_or_mission_desc": "TEXT",
+                "mission_desc": "TEXT", "website": "TEXT", "principal_officer_name": "TEXT"},
     "officers": {"is_highest_compensated_employee": "INTEGER"},
+    "returns_governance": {"object_id": "TEXT", "ein": "TEXT",
+                           **{c: "INTEGER" for c in BAND1_GOVERNANCE_COLS}},
+    "returns_checklist": {"object_id": "TEXT", "ein": "TEXT",
+                          **{c: "INTEGER" for c in BAND1_CHECKLIST_COLS}},
 }
 
 
@@ -1043,6 +1421,11 @@ _REGISTERED_INVARIANTS = {
     "newfields_witnesses": newfields_witnesses,
     "newfields_schema_drift_guard": newfields_schema_drift_guard,
     "return_version_integrity": return_version_integrity,
+    "canonical_selection": canonical_selection,
+    "canonical_witnesses": canonical_witnesses_invariant,
+    # Band-1 remainder (registered 2026-07-19, port session)
+    "band1_reconciliation": band1_reconciliation,
+    "band1_witnesses": band1_witnesses,
 }
 
 # What each stage REQUIRES before it may promote. Stages >= 1 require the new-field
@@ -1064,6 +1447,12 @@ _NEWFIELD_INVARIANTS = [
     "newfields_witnesses",
     "newfields_schema_drift_guard",
     "return_version_integrity",
+    "canonical_selection",
+    "canonical_witnesses",
+    # Band-1 remainder (2026-07-19): stage ≥1 promotion of the expanded parse
+    # additionally requires the Band-1 ties + attested golden set.
+    "band1_reconciliation",
+    "band1_witnesses",
 ]
 _REQUIRED_BY_STAGE = {
     0: [],  # fixture corpus — dev sandbox, no baseline gate
@@ -1107,15 +1496,122 @@ def promotion_gate(conn: sqlite3.Connection, stage: int, log=print) -> None:
         f"({', '.join(required) or 'none'}).")
 
 
+def raw_name_fidelity_gate(log=print) -> bool:
+    """W8 — DO-NOT #1 standing regression (#306/#299, maintainer round-2 item C,
+    2026-07-11): name_line1/name_line2 must be emitted BYTE-FAITHFUL by the
+    live returns path — never routed through full_biz_name/join_name (those
+    normalize; joining is the derive layer's job at the flip).
+
+    WHY A FIXTURE AND NOT A DB CHECK: the corpus's e-file XML is whitespace-
+    canonical at the source (measured 2026-07-11: 0 whitespace-non-canonical
+    stored rows in 5.43M l1 / 1.03M l2), so acceptance criterion 2 was VACUOUS
+    there — a raw-fidelity check against real data passes identically whether
+    the writer stores raw bytes or normalizes them. This synthetic fixture with
+    deliberately non-canonical bytes (leading/doubled/trailing spaces, embedded
+    tab, lowercase, non-ASCII) is the ONLY thing that catches a future
+    normalization of the raw path. It fails loudly if anyone routes the raw
+    columns through a normalizer, and self-reds if the fixture is ever
+    'cleaned' into canonical text (which would make the gate vacuous again).
+    """
+    import tempfile
+    import os
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import extract_990 as e990
+    from name_rules import _norm
+
+    L1 = "  wEird   Test É ORG  "          # lead/double/trail + lowercase + É
+    L2 = " c/o  Someone\tTabbed "                # lead/double + tab + trail + lowercase
+    NS = "http://www.irs.gov/efile"
+    xml = (f'<?xml version="1.0" encoding="utf-8"?>\n'
+           f'<Return xmlns="{NS}" returnVersion="2023v4.0">'
+           f'<ReturnHeader><ReturnTs>2023-01-01T00:00:00-05:00</ReturnTs>'
+           f'<ReturnTypeCd>990</ReturnTypeCd>'
+           f'<Filer><EIN>999999999</EIN><BusinessName>'
+           f'<BusinessNameLine1Txt>{L1}</BusinessNameLine1Txt>'
+           f'<BusinessNameLine2Txt>{L2}</BusinessNameLine2Txt>'
+           f'</BusinessName></Filer></ReturnHeader>'
+           f'<ReturnData><IRS990></IRS990></ReturnData></Return>')
+
+    # teeth check first: the fixture must BE non-canonical, or this gate is vacuous
+    if _norm(L1) == L1 or _norm(L2) == L2:
+        log("GATE_RAWNAME_RED: fixture strings are whitespace-canonical — the gate "
+            "is VACUOUS and cannot detect a normalizing raw path. Restore the "
+            "garbage bytes; do NOT 'clean' this fixture.")
+        return False
+
+    with tempfile.TemporaryDirectory() as td:
+        fp = os.path.join(td, "999999999999999999_public.xml")
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write(xml)
+        row = e990.parse_file(fp)
+
+    if row.get("parse_error"):
+        log(f"GATE_RAWNAME_RED: fixture failed to parse: {row['parse_error']}")
+        return False
+    bad = []
+    if row.get("name_line1") != L1:
+        bad.append(f"name_line1 {row.get('name_line1')!r} != {L1!r}")
+    if row.get("name_line2") != L2:
+        bad.append(f"name_line2 {row.get('name_line2')!r} != {L2!r}")
+    if row.get("org_name") != L1:
+        bad.append(f"org_name (legacy raw line1) {row.get('org_name')!r} != {L1!r}")
+    if bad:
+        log("GATE_RAWNAME_RED: raw path NORMALIZED or altered the bytes — DO-NOT #1 "
+            "violated (did someone route name_line1/2 through full_biz_name/"
+            "join_name?): " + " ; ".join(bad))
+        return False
+    # red-proof note: a normalizing path would emit _norm(L1) != L1 and fail above.
+    log("GATE_RAWNAME_OK: W8 raw-name fidelity — garbage bytes survive the live "
+        "returns path verbatim (lead/double/trail ws, tab, case, non-ASCII); "
+        "a normalizing raw path cannot pass this gate.")
+    return True
+
+
 def main() -> int:
     # argv[1] = optional DB-path override so the build can gate the freshly-built
     # public DB ($PUBLIC_DB); default DB_PATH is the source 990data.db. Wired as
     # the 5th validate-before-deploy gate in update.sh (#232). Backward-compatible:
     # a no-arg invocation still gates DB_PATH (the manual-run behaviour).
+    #
+    # Canonical-layer gate (Phase-1, 2026-07-06): on any DB where the layer has
+    # LANDED (amended_return present), the canonical_selection invariant + W1-W7
+    # witnesses must also be green — a post-layer DB with a broken/missing/stale
+    # selection would break every canonical consumer (templates, questions.json,
+    # REST, MCP). A PRE-layer DB (column absent — e.g. an old-snapshot restore
+    # vehicle) skips them LOUDLY and gates on baseline only, mirroring the #296
+    # preflight restore-vehicle carve-out: blocking a 2 AM rollback on an invariant
+    # its snapshot predates is the wrong failure mode. Post-Aug-1 consumers require
+    # the layer, so restoring a pre-layer snapshot is its own conscious decision.
     db = sys.argv[1] if len(sys.argv) > 1 else DB_PATH
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        return 0 if assert_baseline_green(conn) else 1
+        green = assert_baseline_green(conn)
+        green = raw_name_fidelity_gate() and green   # W8 — DB-independent, DO-NOT #1
+        if "amended_return" in _columns(conn, "returns"):
+            green = canonical_selection(conn) and green
+            green = canonical_witnesses_invariant(conn) and green
+        else:
+            print("GATE_CANON_SKIP: amended_return absent — pre-Phase-1 DB (restore "
+                  "vehicle?); canonical-layer gate skipped, baseline only. Post-Aug-1 "
+                  "consumers REQUIRE the layer — verify this deploy is intentional.")
+        # Band-1 gate (Step-4 wiring, 2026-07-19; precondition = the verified
+        # backfill, band1_backfill_real_2026-07-19/VERIFICATION.md): on any DB
+        # carrying EITHER §B/§C table, the reconciliation + witness legs gate
+        # too. Skip is reserved for the two legitimate both-absent shapes — a
+        # pre-flip public build (PUBLIC_TABLES drops §B/§C until maintainer's flip;
+        # §A there is covered by band1_public_gate.py) and a pre-band1 snapshot
+        # restore vehicle (same carve as GATE_CANON_SKIP above). A half-present
+        # DB does NOT skip: the OR lets it through to band1_reconciliation,
+        # which REDs fail-closed on the missing sibling.
+        if _table_exists(conn, "returns_governance") \
+                or _table_exists(conn, "returns_checklist"):
+            green = band1_reconciliation(conn) and green
+            green = band1_witnesses(conn) and green
+        else:
+            print("GATE_BAND1_SKIP: returns_governance/returns_checklist absent — "
+                  "pre-flip public build or pre-band1 snapshot; Band-1 legs "
+                  "skipped (they gate the master corpus and post-flip builds).")
+        return 0 if green else 1
     finally:
         conn.close()
 

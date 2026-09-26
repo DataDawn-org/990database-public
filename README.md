@@ -157,6 +157,10 @@ The update script can optionally deploy to a Datasette instance. Set `REMOTE_HOS
 
 ---
 
+## Sync cadence
+
+This repository is a lagging copy of the published 990 pipeline files, synced from the maintainer's working tree in deliberate batches rather than continuously. No published file trails its sanitized source by more than 60 days. For live data, use https://data.datadawn.org.
+
 ## Mirror-sync conventions
 
 This repository mirrors the maintainer's working scripts. Synced files are byte-identical to source, with one deliberate exception: **`scripts/extract_990.py` carries three portability adaptations that must survive every sync** — do not "correct" them back to absolute paths:

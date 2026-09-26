@@ -700,6 +700,16 @@
             return `<span class="ntee-badge">${esc(code)}${name ? ' — ' + name : ''}</span>`;
         }
 
+        // IRS EO-BMF code tables (irs.gov "Exempt Organizations Business Master File Extract" documentation).
+        const DEDUCTIBILITY = { '1': 'Contributions are deductible', '2': 'Contributions are not deductible', '4': 'Contributions are deductible by treaty (foreign organizations)' };
+        const STATUS_CODES = { '01': 'Unconditional exemption', '02': 'Conditional exemption', '12': 'Trust described in section 4947(a)(2)', '25': 'Organization terminating its private foundation status under section 507(b)(1)(B)' };
+        let _bmfAsOf = undefined;
+        async function bmfSourceAsOf() {
+            if (_bmfAsOf !== undefined) return _bmfAsOf;
+            try { const r = await query('SELECT as_of_date FROM bmf_source_meta ORDER BY loaded_utc DESC LIMIT 1'); _bmfAsOf = (r && r[0] && r[0].as_of_date) || null; }
+            catch (e) { _bmfAsOf = null; }
+            return _bmfAsOf;
+        }
         function foundationLabel(code) {
             const labels = {
                 '00': 'Church (170(b)(1)(A)(i))',
@@ -805,8 +815,10 @@
                 ORDER BY asset_amt DESC
                 LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
             `;
+            const countSql = `SELECT COUNT(*) AS cnt FROM bmf WHERE ${where} ${filterW}`;
 
-            const rows = await query(sql);
+            const [rows, countRows] = await Promise.all([query(sql), query(countSql).catch(() => null)]);
+            const totalCount = countRows && countRows[0] ? countRows[0].cnt : null;
             const hasMore = rows.length > PAGE_SIZE;
             if (hasMore) rows.pop();
 
@@ -817,7 +829,8 @@
 
             let html = '';
             if (offset === 0) {
-                html += `<div class="status"><span class="count">${rows.length}${hasMore ? '+' : ''}</span> organizations found</div>`;
+                const countLabel = totalCount != null ? Number(totalCount).toLocaleString() : `${rows.length}${hasMore ? '+' : ''}`;
+                html += `<div class="status"><span class="count">${countLabel}</span> organizations found</div>`;
             }
 
             for (const r of rows) {
@@ -910,14 +923,43 @@
                     const fl = foundationLabel(org.foundation);
                     html += `<div class="detail-item" style="grid-column:span 2"><div class="label">Foundation Type</div><div class="value">${fl ? esc(fl) : esc(org.foundation)}</div></div>`;
                 }
-                if (org.deductibility) {
-                    const dedLabels = {'1': 'Contributions deductible', '2': 'Not deductible', '4': 'Deductibility depends on use'};
-                    html += `<div class="detail-item"><div class="label">Deductibility</div><div class="value">${esc(dedLabels[org.deductibility] || org.deductibility)}</div></div>`;
+                // ── RESTORED 2026-09-05 (maintainer ruling, BMF refresh #431-#435): Deductibility and
+                // Status render again WITH a DERIVED as-of date read from bmf_source_meta (the
+                // committed loader stamps it at each refresh), never a typed constant. The 2026-08-07
+                // suppression note is kept below as the record of why the stamp was the precondition.
+                const bmfAsOf = await bmfSourceAsOf();
+                if (org.deductibility !== undefined && org.deductibility !== null && String(org.deductibility) !== '') {
+                    const dl = DEDUCTIBILITY[String(org.deductibility)] || ('Code ' + esc(String(org.deductibility)));
+                    html += `<div class="detail-item"><div class="label">Deductibility</div><div class="value">${dl}${bmfAsOf ? ` <span class="muted">(IRS file as of ${esc(bmfAsOf)})</span>` : ''}</div></div>`;
                 }
-                if (org.status) {
-                    const statLabels = {'01': 'Unconditional Exemption', '02': 'Conditional Exemption', '12': 'Trust (4947(a)(1))', '25': 'Terminated (501(c)(3))'};
-                    html += `<div class="detail-item"><div class="label">Status</div><div class="value">${esc(statLabels[String(org.status).padStart(2,'0')] || org.status)}</div></div>`;
+                if (org.status !== undefined && org.status !== null && String(org.status) !== '') {
+                    const sl = STATUS_CODES[String(org.status)] || ('Code ' + esc(String(org.status)));
+                    html += `<div class="detail-item"><div class="label">Exemption Status</div><div class="value">${sl}${bmfAsOf ? ` <span class="muted">(IRS file as of ${esc(bmfAsOf)})</span>` : ''}</div></div>`;
                 }
+                // ── SUPPRESSED 2026-08-07 (maintainer ruling) — Deductibility and Status ──────────
+                // These two rendered a LEGAL STATUS assertion ("Contributions deductible",
+                // "Unconditional Exemption") from a BMF snapshot dated 2026-02-09, with no
+                // date attached. The bmf table has no refresh mechanism at all — the loader
+                // was never committed (990project/PIPELINE.md:52) and nothing schedules a
+                // re-pull (:317, unchecked) — so an org auto-revoked since February still
+                // renders as currently exempt with deductible contributions.
+                //
+                // WHY SUPPRESSION RATHER THAN AN AS-OF DATE: the date would have to be a
+                // hardcoded constant, because no explore page carries a recency stamp of any
+                // kind (probed with a positive control, 2026-08-07). A second hand-maintained
+                // constant is the exact class that produced this finding.
+                //
+                // ⏪ REVERSIBLE THE MOMENT A REAL STAMP EXISTS. The committed CSV→table
+                // loader (followup_queue #53 / the BMF loader item) stamps the source date
+                // into the DB as it writes; at that point these two fields come back WITH a
+                // derived as-of date rather than an asserted one. Restore both blocks then.
+                //
+                // Framing, so the record is accurate: this page is publicly reachable and
+                // linked across the explore suite (990.html:532, daf.html:482,
+                // grants.html:490), but nothing is launched and there is no known audience.
+                // The reason to fix it is CORRECTNESS -- DataDawn should not assert an
+                // organisation's current tax-deductibility from a February snapshot -- not
+                // exposure. Cross-ref: followup_queue #431, #432, #433.
                 html += '</div>';
 
                 // Try to load filings from returns table
@@ -938,7 +980,7 @@
                                 <td>${esc(f.tax_period_end || '')}</td>
                                 <td>${fmtMoney(f.total_revenue)}</td>
                                 <td>${fmtMoney(f.total_assets_eoy)}</td>
-                                <td><a href="/990data_public/returns/${esc(f.object_id)}" target="_blank" class="doc-link">View</a></td>
+                                <td><a href="/filing/${esc(f.object_id)}" target="_blank" class="doc-link">View</a></td>
                             </tr>`;
                         }
                         html += '</tbody></table>';
@@ -955,7 +997,7 @@
                 html += `<a href="/explore/990.html?q=${encodeURIComponent(ein)}" target="_blank" class="doc-link">990 Filings Explorer &rarr;</a>`;
                 html += `<a href="/explore/grants.html?q=${encodeURIComponent(ein)}" target="_blank" class="doc-link">Grants Explorer &rarr;</a>`;
                 html += `<a href="/explore/daf.html?q=${encodeURIComponent(ein)}" target="_blank" class="doc-link">DAF Grants Explorer &rarr;</a>`;
-                html += `<a href="/990data_public/bmf/${esc(ein)}" target="_blank" class="doc-link">Raw BMF Record &rarr;</a>`;
+                html += `<a href="/org/${esc(ein)}" target="_blank" class="doc-link">Full Organization Page &rarr;</a>`;
                 html += `<a href="https://projects.propublica.org/nonprofits/organizations/${esc(ein)}" target="_blank" class="doc-link">ProPublica Nonprofit Explorer &rarr;</a>`;
                 html += '</div>';
 

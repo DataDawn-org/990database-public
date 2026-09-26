@@ -81,6 +81,16 @@
       "growth": "incremental",
       "smoke": true,
       "dup_check": true
+    },
+    "returns_governance": {
+      "floor": 2500000,
+      "growth": "incremental",
+      "smoke": true
+    },
+    "returns_checklist": {
+      "floor": 2500000,
+      "growth": "incremental",
+      "smoke": true
     }
   }
 }

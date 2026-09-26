@@ -10,9 +10,21 @@ If you have questions, suggestions, want to coordinate access patterns, or just 
 
 ## Database overview
 
-This database contains IRS e-file data from Forms 990, 990-EZ, 990-PF, and 990-T covering tax years 2014–2025. It includes 1.9 million unique organizations, 13.6 million foundation grants, 1.27 million DAF disbursements, and 44.8 million officer/director records.
+This database contains every Form 990, 990-EZ, 990-PF, and 990-T e-file XML record the IRS has released, as of the most recent build (2026-09-09). Within that source, there are no gaps. It includes 1.9 million unique organizations, 13.6 million foundation grants, 1.27 million DAF disbursements, and 44.8 million officer/director records.
+
+But "every electronic record the IRS released" is not "every nonprofit." Two limits:
+
+1. **The smallest organizations are never here.** Organizations with gross receipts of $50,000 or less meet their annual obligation with Form 990-N — an eight-field electronic postcard the IRS publishes separately, which this database does not carry. At least 827,000 currently-filing organizations appear nowhere in this database, in any year, for that reason. In tax year 2022 the database holds 669,984 organizations, so the excluded population is roughly the same size as the included one.
+   - *Counting organizations:* this database sees roughly half the annually-filing exempt sector. Don't use it for organization counts.
+   - *Analyzing money:* negligible. Form 990-N reports no financial data at all — no revenue, no expenses, no assets — and its filers are by definition under $50,000 in gross receipts. Every organization that reports financial detail to the IRS electronically is here.
+
+2. **Earlier years capture only the organizations that chose to e-file.** Electronic filing was voluntary until the Taxpayer First Act made it mandatory — Forms 990 and 990-PF from tax year 2020, Form 990-EZ from 2021. Before then the database holds a rising share of filers, skewed toward larger ones: in tax year 2016, roughly 71% of established filing organizations appear, versus ~87% of those above $10M in revenue. From tax year 2021 forward, coverage of organizations required to file a full return is essentially universal. Don't compute year-over-year trends across the pre-2021 span without accounting for this; the apparent growth in filings from 2016 to 2021 is mostly e-filing adoption, not sector growth.
+
+Per-tax-year counts and representativeness flags are at `/api/coverage`.
 
 The JSON API is at `https://data.datadawn.org/990data_public.json`. Append `?sql=QUERY&_shape=objects` to run arbitrary SQL. All data is public domain (IRS e-files).
+
+> ⚠ **Data note (updated 2026-07-11):** Authoritative-filing selection is live — the pre-written question catalog (`/api/questions.json`) and the REST API now aggregate over canonical (non-superseded) filings. Hand-written SQL over the detail tables (`grants`, `officers`, `schedule_i_grants`, …) still includes superseded (amended-over) filings unless you join `canonical_filings` — see "Amended filings / canonical selection" below. **One residual under active correction:** the 990-PF `contributors` and `investments` tables can carry repeated as-filed entries beyond the amended-filing case; treat sums over those two as upper bounds until this note is updated.
 
 ## Bulk dumps (preferred for training, research, batch analysis)
 
@@ -43,49 +55,105 @@ Key parameters:
 
 ## Core Tables
 
-### returns (5.3M rows)
+### returns (5.7M rows)
 One row per IRS filing. The central table — `object_id` links to all detail tables.
 
-Key columns: `object_id` (PK), `ein`, `org_name`, `state`, `tax_year`, `return_type` (990/990EZ/990PF/990T), `total_revenue`, `total_expenses`, `total_assets_eoy`, `contributions_received`, `contributions_paid`, `fmv_assets_eoy`, `qualifying_distributions`, `ntee_code`
+Key columns: `object_id` (PK), `ein`, `org_name`, `state`, `tax_year`, `return_type` (990/990EZ/990PF/990T), `total_revenue`, `total_expenses`, `total_assets_eoy`, `contributions_received`, `contributions_paid`, `fmv_assets_eoy`, `qualifying_distributions`
+
+**IMPORTANT**: `returns.ntee_code` is a **materialised copy of `bmf.ntee_cd`, refreshed with the BMF** (weekly check, refresh on change; last recompute 2026-09-05, which filled 495,677 rows and updated 1,411). Per-EIN provenance is in **`returns_ntee_source`** (`source`, `source_asof`) — currently 583,114 EINs from the 2026-09-05 file and 10,512 kept from the prior 2026-02-09 file because the EIN left the BMF. Coverage is **71.4% for 2023 filings, 72.7% for 2024, 74.4% for 2025**. A null means *no BMF classification for that EIN*, **not** *unclassified by the IRS*. The join below is still the authoritative route; use it when you need the current code rather than the materialised one:
+
+    SELECT r.*, b.ntee_cd FROM returns r LEFT JOIN bmf b ON b.ein = r.ein
+
+Use `LEFT JOIN`, not an inner join: **126,031 of the 897,935 distinct EINs (14.0%)** in the returns corpus have no `bmf` row at all, including revoked and terminated entities that will never have one, and an inner join silently drops them. `bmf` is a **point-in-time IRS snapshot — currently 2026-09-05** (vintage and row count in `bmf_source_meta`; the build date of this whole database is in `build_metadata`), so organizations registered after that snapshot have no row either. Organizations that were in a previous file and are absent from this one are kept in **`bmf_former`** (60,443 rows) with their last-known section and NTEE code.
+
+**New (2026-07), Form 990 proper only**: `voting_members_cnt`, `voting_members_independent_cnt`, `total_employee_cnt`, `total_volunteers_cnt`, `gross_receipts`, `formation_year`, `legal_domicile_state`, `activity_or_mission_desc`, `mission_desc`, `website`, `principal_officer_name`. NULL on a 990-EZ/990-PF row means the form lacks the field; NULL never means zero.
 
 **IMPORTANT**: Always filter `return_type IN ('990', '990EZ')` for revenue analysis — 990-T filings distort numbers.
 
-### bmf (1.9M rows)
+**Amended filings / canonical selection**: `returns` stores EVERY filing as filed,
+including superseded (amended-over) ones. For the authoritative filing per
+organization-year, query the `canonical_returns` view (same columns; exactly one
+canonical filing per `ein` + `tax_year` + `return_type`, amended > latest `return_ts` >
+`object_id` tiebreak). Corpus-scale joins can use the `canonical_filings` table (the
+canonical `object_id` set, faster than the view at full scale). Do NOT pick "latest"
+by `MAX(object_id)` — object_id is release-batch order, not recency.
+
+Because selection is per (`ein`, `tax_year`, `return_type`), one organization-year can
+have more than one canonical row when it filed under multiple form types: usually a main
+return plus a separate 990-T (unrelated business income), and in ~1,993 cases one filing
+period recorded under two form types (e.g., a 990-EZ superseded by a full 990). Aggregate
+at the (`ein`, `tax_year`, `return_type`) grain — not (`ein`, `tax_year`) — to avoid
+double-counting.
+
+**Amended-only filings**: ~11,955 filings (~0.2%) are amended returns that are the sole
+filing for their (`ein`, `tax_year`, `return_type`) — no non-amended original for that key
+appears in the IRS e-file data. The amended return is authoritative (it is what
+`canonical_returns` returns). Causes vary — for older tax years the original often predates
+the e-file corpus (processing year 2017+); for recent years the cause is not established.
+Published as filed.
+
+### bmf (2.0M rows — IRS Exempt Organizations Business Master File as of 2026-09-09; vintage + row counts in `bmf_source_meta`)
 IRS Business Master File — reference table of all tax-exempt organizations.
 
 Key columns: `ein` (PK), `name`, `city`, `state`, `subsection` (03=501(c)(3), 04=501(c)(4)), `ntee_cd`, `asset_amt`, `income_amt`
 
-### grants (13.8M rows)
+### bmf_former (63K rows)
+Organizations present in a PREVIOUS IRS Business Master File and absent from the current one (removal usually means revocation or termination of exempt status). Last-known `name`, `subsection`, `ntee_cd`, `status`, plus `last_seen_asof` (the last file that listed the org) and `dropped_asof` (the first that did not). Join on `ein` when `bmf` has no row.
+
+### returns_ntee_source (594K rows)
+Per-EIN provenance of `returns.ntee_code`: `source='bmf'` = equals the current IRS file (as of `source_asof`); `source='prior_bmf_kept'` = the org left the IRS file and its code was KEPT from the earlier file dated `source_asof` rather than blanked. `returns.ntee_code` is blank when the IRS file carries no NTEE code for the EIN or the EIN is not in the file.
+
+### bmf_source_meta (1 rows)
+Provenance of `bmf`: load time, `as_of_date`, source-file manifest, row count, content hash.
+
+### grants (14.5M rows)
 Foundation grants from 990-PF filings.
 
 Key columns: `id` (PK), `object_id`, `ein` (**this is the FUNDER EIN, not the recipient**), `recipient_name`, `recipient_city`, `recipient_state`, `amount`, `purpose`, `grant_type` (paid/future/exp_responsibility)
 
 **IMPORTANT**: `grants.ein` is the FUNDER, not the recipient. Match recipients by `recipient_name`. Always filter `grant_type = 'paid'` unless you want future commitments.
 
-### schedule_i_grants (1.3M rows)
+### schedule_i_grants (1.5M rows)
 DAF (Donor-Advised Fund) disbursements from 19 major sponsors (Fidelity Charitable, Schwab, Vanguard, etc.).
 
 Key columns: `id` (PK), `funder_ein`, `funder_name`, `recipient_name`, `recipient_ein`, `amount`, `purpose`, `tax_year`
 
-### schedule_i_990 (6.7M rows)
+### schedule_i_990 (7.3M rows)
 Public charity grants — Schedule I from 990/990-EZ filers.
 
 Key columns: `id` (PK), `object_id`, `ein` (funder), `recipient_name`, `recipient_ein`, `cash_grant_amt`, `purpose`
 
-### officers (43.6M rows)
+### officers (46.3M rows)
 Officers, directors, trustees, and key employees.
 
 Key columns: `object_id`, `ein`, `person_name`, `title`, `reportable_comp_filing_org` (W-2 from filing org, ALL forms), `reportable_comp_related_org` (Form 990 ONLY — W-2 from related orgs), `other_compensation` (Form 990 ONLY — IRS "other comp" lump), `benefits` (990-EZ + 990-PF ONLY), `expense_account` (990-EZ + 990-PF ONLY). The legacy `compensation` column is being deprecated — use `reportable_comp_filing_org`. See `officer_total_comp` view for cross-form total.
 
+### returns_governance (2.9M rows)
+Form 990 Part VI governance answers — one row per Form-990-proper filing, joined via `object_id`.
+
+Key columns: `object_id`, `ein`, policy indicators (`conflict_of_interest_policy_ind`, `whistleblower_policy_ind`, `document_retention_policy_ind`, `material_diversion_ind`, `minutes_of_governing_body_ind`, `comp_process_ceo_ind`, ...), board counts (`governing_body_voting_members_cnt`, `independent_voting_members_cnt`)
+
+**IMPORTANT — boolean semantics**: 1 = Yes, 0 = answered No, NULL = NOT REPORTED on the filing. "No" and "not reported" are different claims — never read a blank as No. COUNT/AVG silently exclude NULLs, so state your denominator. Conditional sub-questions (e.g. `coi_annual_disclosure_ind`) are NULL whenever the parent question was not Yes. Superseded filings included — join `canonical_filings` via `object_id` for authoritative-only analysis.
+
+```sql
+SELECT ROUND(100.0 * SUM(whistleblower_policy_ind) / COUNT(whistleblower_policy_ind), 1) AS pct_yes,
+       COUNT(whistleblower_policy_ind) AS answered
+FROM returns_governance
+```
+
+### returns_checklist (2.9M rows)
+Form 990 Part IV checklist — the 53 "must the filer complete Schedule X" yes/no answers per Form-990-proper filing (`schedule_b_required_ind`, `lobbying_activities_ind`, `donor_advised_fund_ind`, `operate_hospital_ind`, `gaming_activities_ind`, `tax_exempt_bonds_ind`, ...). Same semantics: 1 = Yes, 0 = answered No, NULL = not reported. Useful as a fast structural filter (e.g. every filer reporting gaming activity, or foreign grants over $5,000). Joined via `object_id`; superseded filings included.
+
 ## Other Tables
 
-- `capital_gains` (15.9M) — 990PF investment gains/losses
-- `related_orgs` (9.1M) — Related organizations (Schedule R)
-- `investments` (4.9M) — 990PF investment holdings
-- `program_activities` (378K) — Program service descriptions
-- `contributors` (510K) — Substantial contributors (Schedule B, 990-PF filers only)
-- `contractors` (69K) — Five highest-paid independent contractors. **Parsed from Form 990-PF filings only** — an empty result for a Form 990/990-EZ filer means not yet parsed, NOT "none reported."
-- `top_employees` (55K) — Highest-compensated employees (non-officers). **Parsed from Form 990-PF filings only** — same caveat as contractors.
+- `capital_gains` (18.4M) — 990PF investment gains/losses
+- `related_orgs` (9.7M) — Related organizations (Schedule R)
+- `investments` (5.4M) — 990PF investment holdings
+- `program_activities` (405K) — Program service descriptions
+- `program_investments` (229K) — Program-related investments: Form 990-PF
+- `contributors` (541K) — Substantial contributors (Schedule B, 990-PF filers only)
+- `contractors` (1.1M) — Five highest-paid independent contractors, parsed from **Form 990 and 990-PF** filings (990 Part VII Sec B; PF Part VIII). An empty result means none reported above the $100K threshold.
+- `top_employees` (57K) — Highest-compensated employees (non-officers). This table covers Form 990-PF. Form-990 highest-compensated employees are not duplicated here — they appear in the `officers` table flagged `is_highest_compensated_employee`.
 
 ## Full-Text Search
 
