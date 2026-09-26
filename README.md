@@ -6,7 +6,7 @@ Built by a human, [Claude](https://www.anthropic.com/claude) (Anthropic), and DJ
 
 **Live instance**: https://data.datadawn.org/
 **Explore pages**: https://data.datadawn.org/explore/
-**Build command**: `bash scripts/update.sh`
+**Build**: run the scripts in [Pipeline](#pipeline), in order
 
 ## Data at a Glance
 
@@ -59,42 +59,27 @@ Monthly extract of all tax-exempt organizations with NTEE codes, ruling dates, a
 
 ## Pipeline
 
-The update script (`scripts/update.sh`) automates the full pipeline:
-
-```bash
-bash scripts/update.sh              # full update
-bash scripts/update.sh --dry-run    # preview what would happen
-```
-
-### Manual execution order
-
-Run from the project root:
+The maintainer runs the full monthly pipeline — download, parse, build the public copy, deploy — with an orchestrator script that is not part of this repository. The scripts here are the pipeline's download and parsing steps and run on their own. Run them from the project root, in this order:
 
 ```
-1. bash scripts/update.sh           # Downloads new IRS ZIPs, extracts, parses
+1. bash scripts/backfill_download.sh           # download and extract the IRS XML batches not yet done
+2. python3 scripts/extract_990.py              # core fields -> returns table (also creates canonical_returns)
+3. python3 scripts/extract_990pf_detail.py     # 990-PF detail tables (grants, officers, etc.)
+4. python3 scripts/extract_990_detail.py       # 990/990-EZ detail tables
+5. python3 scripts/extract_schedule_i.py       # Schedule I DAF/intermediary grants
+6. python3 scripts/backfill_ntee.py            # load the BMF and backfill NTEE codes
 ```
 
-Or run individual extraction scripts:
+`scripts/backfill_download.sh` writes to the directory set in `PROJECT_DIR` at its top, which names the maintainer's layout; set it to yours.
 
-```
-1. python3 scripts/extract_990.py            # Core 990 fields → returns table (~2 hrs)
-2. python3 scripts/extract_990pf_detail.py   # 990-PF detail tables (grants, officers, etc.)
-3. python3 scripts/extract_990_detail.py     # 990/990-EZ detail tables
-4. python3 scripts/extract_schedule_i.py     # Schedule I DAF/intermediary grants
-5. python3 scripts/backfill_ntee.py          # Backfill NTEE codes from BMF
-```
-
-Each script is idempotent — it reads all XML files in the year directories and uses `INSERT OR IGNORE` to skip already-processed filings.
+Re-running the extraction scripts is safe:
+- `extract_990.py` walks the XML files in the year directories and uses `INSERT OR IGNORE`, so filings already loaded are skipped.
+- `extract_990pf_detail.py` and `extract_990_detail.py` read the filings already indexed in `returns` and skip any `object_id` already present in their tables.
+- `extract_schedule_i.py` rebuilds `schedule_i_grants` from scratch on every run.
 
 ### How the IRS data is organized
 
-The IRS publishes e-filed 990s at `https://apps.irs.gov/pub/epostcard/990/xml/{YEAR}/`. Each year directory contains multiple ZIP batches (`2024_TEOS_XML_01A.zip`, etc.), each holding thousands of XML files. The update script:
-
-1. Checks the IRS site for new batches not yet downloaded
-2. Downloads and extracts new ZIPs
-3. Runs extraction scripts over the new XML files
-4. Builds a public database copy (drops any non-core tables)
-5. Optionally uploads to a Datasette server
+The IRS publishes e-filed 990s at `https://apps.irs.gov/pub/epostcard/990/xml/{YEAR}/`. Each year directory contains multiple ZIP batches (`2024_TEOS_XML_01A.zip`, etc.), each holding thousands of XML files. `scripts/backfill_download.sh` downloads every batch not yet marked done in `.extracted/` and extracts its XML files into per-year directories; the extraction scripts then parse them.
 
 ---
 
@@ -146,14 +131,13 @@ All detail tables link to `returns` via `object_id` (the IRS-assigned filing ide
 
 ## Deployment
 
-The update script can optionally deploy to a Datasette instance. Set `REMOTE_HOST` in `scripts/update.sh` to your server's address. The deployment step:
+data.datadawn.org is deployed by the maintainer's monthly update script, which is not part of this repository. Its deploy step:
 
-1. Copies the full database and drops non-core tables
-2. Builds FTS5 full-text search indexes (org names, grant recipients)
-3. Vacuums to reclaim space
-4. Uploads the public database via `scp`
-5. Deploys templates and static assets
-6. Restarts Datasette
+- copies the database and drops every table that is not on its list of published tables;
+- builds the FTS5 full-text search indexes;
+- vacuums the copy;
+- uploads it to the Datasette server, with the templates and static assets;
+- restarts Datasette.
 
 ---
 
