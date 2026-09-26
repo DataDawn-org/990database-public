@@ -163,18 +163,20 @@ This repository is a lagging copy of the published 990 pipeline files, synced fr
 
 ## Mirror-sync conventions
 
-This repository mirrors the maintainer's working scripts. Synced files are byte-identical to source, with one deliberate exception: **`scripts/extract_990.py` carries three portability adaptations that must survive every sync** — do not "correct" them back to absolute paths:
+This repository mirrors the maintainer's working scripts and pages. Each synced file is built from its source by a sanitizer (maintainer-side tooling, not part of this repository) and is otherwise byte-identical to that source. The sanitizer applies these changes on every sync, and they must survive every sync:
 
-1. Docstring paths are relative (`./{2019..2026}`, `./990data.db`), not the maintainer's local layout.
-2. `from pathlib import Path` is added to the imports.
-3. `BASE_DIR = str(Path(__file__).resolve().parent.parent)` replaces the hard-coded local directory.
+- **In every synced file:** the server address → `YOUR_SERVER_IP`, the maintainer's home path → `$HOME`, and personal-name attributions → "maintainer" ("MAINTAINER" where the source is in capitals).
+- **`scripts/extract_990.py`** carries three portability adaptations — do not "correct" them back to absolute paths:
+  1. Docstring paths are relative (`./{2019..2026}`, `./990data.db`), not the maintainer's local layout.
+  2. `from pathlib import Path` is added to the imports.
+  3. `BASE_DIR = str(Path(__file__).resolve().parent.parent)` replaces the hard-coded local directory.
+- **`scripts/test_monthly_contractor_writer.py`** carries a `DATA_BASE` portability adaptation (same class as `BASE_DIR`): its two pinned witness XMLs resolve to the IRS year dirs at the **repo root** (`{2019,2020}/download990xml_*/...`), one level above `scripts/`. Download those IRS batches before running it.
 
-Additionally, **`scripts/update.sh` and the two validation harnesses (`scripts/parser_harness.py`, `scripts/test_monthly_contractor_writer.py`) carry identity/infrastructure sanitization that must survive every sync**: server address → `user@YOUR_SERVER_IP`, backup bucket/remote → `your-b2-bucket`/`b2:`, the maintainer's home path → `$HOME`, provider names in comments genericized, and personal-name attributions in comments → "maintainer". The scripts are otherwise byte-identical to source, with two functional exceptions:
+The sanitizer refuses to publish a file that still carries a backup bucket or remote name, a hosting-provider name, or any other identity marker, so no synced file carries one. `.gitignore` is this repository's own and is not synced.
 
-- `scripts/test_monthly_contractor_writer.py` carries a `DATA_BASE` portability adaptation (same class as extract_990.py's `BASE_DIR`): its two pinned witness XMLs resolve to the IRS year dirs at the **repo root** (`{2019,2020}/download990xml_*/...`), one level above `scripts/`. Download those IRS batches before running it; verified green (11/11 proofs) in this layout.
-- `scripts/parser_harness.py`'s **baseline gate** (`python3 parser_harness.py <db>`, what update.sh invokes) is fully functional here. Its separate *promotion/witness* path reads `witness_fixtures_990.json`, a maintainer-side human-attestation record that is deliberately **not mirrored** (it attests who verified what; republishing it rewritten would blur exactly that provenance) — without it that path refuses loudly (fail-closed RED), which is the designed behavior, not a bug.
+One functional difference follows from what is not mirrored: `scripts/parser_harness.py`'s **baseline gate** (`python3 parser_harness.py <db>`, what the maintainer's monthly update invokes) is fully functional here, but its separate *promotion/witness* path reads `witness_fixtures_990.json`, a maintainer-side human-attestation record that is deliberately **not mirrored** (it attests who verified what; republishing it rewritten would blur exactly that provenance) — without it that path refuses loudly (fail-closed RED), which is the designed behavior, not a bug.
 
-Any other divergence between this repo and the source scripts is drift, not convention, and should be closed by a sync PR.
+Files are synced in batches (see Sync cadence). Between batches, a difference between this repository and the sanitized source is lag; any other divergence is drift, closed by the next sync.
 
 ---
 
