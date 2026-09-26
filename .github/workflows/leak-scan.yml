@@ -257,7 +257,7 @@ jobs:
           fi
           echo "OK: whole tree clean."
 
-      - name: Report to healthchecks.io (scheduled/manual runs only)
+      - name: Report to healthchecks.io main check (push, schedule, manual; never PRs)
         # PR verdicts surface in the PR itself; the scheduled half needs a
         # wired alert or it is monitor-theater — so a missing ping URL is
         # itself a failure, never silently green.
@@ -273,4 +273,32 @@ jobs:
             curl -fsS -m 10 --retry 3 "$HC_URL" > /dev/null
           else
             curl -fsS -m 10 --retry 3 "$HC_URL/fail" > /dev/null
+          fi
+
+  pr-alert:
+    # Pages on a failed leak check on a SAME-REPO pull request (decisions_log §188). Pings this
+    # repo's OWN PR check (secret LEAK_PR_HC_URL), never main's leak-tree check, which push, schedule
+    # and manual runs keep pinging from scan-tree. Success on pass, /fail on fail; the next passing PR
+    # brings a downed check back up. Fork PRs and Dependabot's secret pool carry no LEAK_PR_HC_URL,
+    # so the step skips quietly there, and Dependabot's own PRs skip the leak jobs (§184(c)) and this job.
+    needs: [scan, scan-tree]
+    if: ${{ always() && github.event_name == 'pull_request' && !(github.event.pull_request.user.login == 'dependabot[bot]' && github.triggering_actor == 'dependabot[bot]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report this PR's leak-check verdict to its own healthchecks.io PR check
+        env:
+          HC_URL: ${{ secrets.LEAK_PR_HC_URL }}
+        run: |
+          if [ -z "${HC_URL:-}" ]; then
+            echo "No LEAK_PR_HC_URL in this run's secrets (fork PR or Dependabot pool): not paging."
+            exit 0
+          fi
+          scan="${{ needs.scan.result }}"; tree="${{ needs.scan-tree.result }}"
+          if [ "$scan" = "success" ] && [ "$tree" = "success" ]; then
+            curl -fsS -m 10 --retry 3 "$HC_URL" > /dev/null || echo "::warning::PR check success ping failed."
+          elif [ "$scan" = "failure" ] || [ "$tree" = "failure" ]; then
+            curl -fsS -m 10 --retry 3 "$HC_URL/fail" > /dev/null \
+              || { echo "::error::A leak check FAILED on this PR and the page could not be sent."; exit 1; }
+          else
+            echo "Leak jobs ended scan=$scan scan-tree=$tree: no verdict, no ping."
           fi
