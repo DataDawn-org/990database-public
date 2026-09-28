@@ -46,6 +46,8 @@ Monthly extract of all tax-exempt organizations with NTEE codes, ruling dates, a
 
 **License**: All IRS data is public domain. No copyright restrictions.
 
+**Visitor data**: how data.datadawn.org and datadawn.org handle visitor data (what our servers record, the one cookie, analytics, how long logs are kept): https://datadawn.org/privacy
+
 ---
 
 ## Prerequisites
