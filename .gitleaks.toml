@@ -73,6 +73,14 @@ keywords = ["hc-ping.com"]
 tags = ["credential", "hc-io"]
 
 [[rules]]
+id = "dd-hcio-ping-slug"
+description = "healthchecks.io slug-form ping URL (hc-ping.com/<ping-key>/<slug>): the project ping key is 22 chars"
+regex = '''https?://hc-ping\.com/([A-Za-z0-9_-]{22})/[a-z0-9_-]+'''
+secretGroup = 1
+keywords = ["hc-ping.com"]
+tags = ["credential", "hc-io"]
+
+[[rules]]
 id = "dd-hcio-api-key"
 description = "healthchecks.io API key (variable-name anchored)"
 regex = '''(?i)(hc[._-]?io|healthchecks)[_a-z]*(api[_-]?key|key|token)[^A-Za-z0-9]{1,8}["']?([0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}|[A-Za-z0-9_-]{20,48})["']?'''
