@@ -3,6 +3,11 @@ name: Gitleaks credential-class scan
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # A push to main is scanned too, after the fact. Branch protection does not bind admins, so a direct push to main
+  # never meets pull_request; this makes a hit there fail visibly. main only, as leak-scan.yml's push trigger
+  # (decisions_log §184(c)): canary branches are not watched, and every other branch is scanned through its PR.
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -28,16 +33,28 @@ jobs:
           sudo install /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
-      - name: Scan PR-added lines for credential-class shapes
+      - name: Scan the added commits for credential-class shapes (the PR's, or the push's)
         run: |
           set -euo pipefail
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          # a new branch (all-zero before) or a base this clone cannot see: scan the pushed commit itself
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            range="-1 ${head}"
+          else
+            range="${base}..${head}"
+          fi
           # --redact masks matched values in output (Actions logs are public + retained)
-          # --log-opts scopes the scan to commits added by this PR
+          # --log-opts scopes the scan to the commits this PR or push added
           gitleaks detect \
             --config .gitleaks.toml \
-            --log-opts="${base}..${head}" \
+            --log-opts="${range}" \
             --redact \
             --no-banner \
             --report-format json \
@@ -46,6 +63,6 @@ jobs:
       - name: Summarize on failure
         if: failure()
         run: |
-          echo "::error::Gitleaks flagged credential-shape content in PR-added lines."
+          echo "::error::Gitleaks flagged credential-shape content in the added commits (${{ github.event_name }})."
           echo "Run locally to see redacted details: gitleaks protect --staged --config .gitleaks.toml --redact"
           echo "Identity-marker scan is handled separately by leak-scan.yml."
