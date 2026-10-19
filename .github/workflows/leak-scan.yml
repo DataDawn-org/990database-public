@@ -64,7 +64,12 @@ jobs:
           # '+++' file headers). Pre-existing matches in untouched lines are
           # ignored — that's the design.
           # (decision recorded 2026-05-12) and is stripped before scanning.
-          added=$(git diff "$base..$head" --no-color | grep -E '^\+[^+]' || true)
+          # TEXT MODE AND STDERR (2026-10-19): without -a, one NUL anywhere in the diff makes grep print
+          # NOTHING (every other file's added lines with it), and in a UTF-8 locale a line holding invalid
+          # UTF-8 is dropped; grep says so only on stderr. So every grep whose output is used runs with -a,
+          # and any grep that writes to stderr fails this step.
+          GREP_ERR=$(mktemp)
+          added=$(git diff "$base..$head" --no-color | grep -a -E '^\+[^+]' 2>>"$GREP_ERR" || true)
 
           # UNION (queue #405, 2026-08-03). LEAK_PATTERN is LEGACY-FROZEN: its value is
           # unreadable, so REPLACING it could silently narrow coverage if it holds markers
@@ -127,12 +132,16 @@ jobs:
             echo "::error::Composed leak pattern is not a valid ERE (grep rc=2). Refusing to report clean — failing closed. Check LEAK_PATTERN / LEAK_PATTERN_LOCAL."
             exit 1
           fi
-          if echo "$added" | grep -qiE "$EFFECTIVE"; then
+          if echo "$added" | grep -a -qiE "$EFFECTIVE" 2>>"$GREP_ERR"; then
             # IMPORTANT: do not echo matched content. Actions logs are public
             # and forever-retained — printing the matched lines would re-leak
             # the exact content we're catching. Authors should run the scan
             # locally to see what triggered it.
             echo "::error::Leak marker detected in PR-added lines. Run the leak scan locally against your diff to identify and remove the offending lines."
+            exit 1
+          fi
+          if [ -s "$GREP_ERR" ]; then
+            echo "::error::A grep in this step wrote $(wc -l < "$GREP_ERR") line(s) to stderr, so its result cannot be trusted. Failing closed; stderr is not printed."
             exit 1
           fi
           echo "OK: no leak markers in added lines."
@@ -248,11 +257,19 @@ jobs:
             echo "::error::Whole-tree scan could not evaluate the pattern (rc=2). Failing closed."
             exit 1
           fi
-          hits=$(git grep -inE "$EFFECTIVE" -- . 2>/dev/null | grep -viE "$ALLOW" || true)
+          # TEXT MODE AND STDERR (2026-10-19, as in the scan job): a NUL in git grep's output (a text file
+          # whose NUL comes after git's 8,000-byte binary check) made the second grep print nothing at all,
+          # every other hit included. Both greps run with -a; either one writing to stderr fails this step.
+          GREP_ERR=$(mktemp)
+          hits=$(git grep -a -inE "$EFFECTIVE" -- . 2>>"$GREP_ERR" | grep -a -viE "$ALLOW" 2>>"$GREP_ERR" || true)
           if [ -n "$hits" ]; then
             nlines=$(printf '%s\n' "$hits" | wc -l)
             nfiles=$(printf '%s\n' "$hits" | cut -d: -f1 | sort -u | wc -l)
             echo "::error::Identity marker present in the committed tree: ${nlines} line(s) across ${nfiles} file(s). Run the whole-tree scan locally (leak-detection/pre-push semantics) to locate them; matched content is never printed here."
+            exit 1
+          fi
+          if [ -s "$GREP_ERR" ]; then
+            echo "::error::A grep in this step wrote $(wc -l < "$GREP_ERR") line(s) to stderr, so its result cannot be trusted. Failing closed; stderr is not printed."
             exit 1
           fi
           echo "OK: whole tree clean."
