@@ -82,11 +82,14 @@ tags = ["credential", "hc-io"]
 
 [[rules]]
 id = "dd-hcio-api-key"
-description = "healthchecks.io API key (variable-name anchored)"
+description = "healthchecks.io API key (variable-name anchored); a value that is itself an UPPER_SNAKE key name passes"
 regex = '''(?i)(hc[._-]?io|healthchecks)[_a-z]*(api[_-]?key|key|token)[^A-Za-z0-9]{1,8}["']?([0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}|[A-Za-z0-9_-]{20,48})["']?'''
 secretGroup = 3
 keywords = ["hc.io", "hc_io", "healthchecks"]
 tags = ["credential", "hc-io"]
+[[rules.allowlists]]
+description = "a key name read as the value"
+regexes = ['''^[A-Z][A-Z0-9]*_[A-Z0-9_]*$''']
 
 [[rules]]
 id = "dd-jwt"
@@ -113,16 +116,19 @@ tags = ["credential", "conn-string"]
 
 [[rules]]
 id = "dd-aws-access-key-id"
-description = "AWS access key ID (AKIA*)"
+description = "AWS access key ID (AKIA*); AWS's documented example ID, ending EXAMPLE, is allowed, as in gitleaks' own aws-access-token rule"
 regex = '''(AKIA[0-9A-Z]{16})'''
 secretGroup = 1
 keywords = ["AKIA"]
 tags = ["credential", "aws"]
+[[rules.allowlists]]
+description = "AWS's documented example key ID"
+regexes = ['''.+EXAMPLE$''']
 
 [[rules]]
 id = "dd-private-key-pem"
-description = "PEM private key block"
-regex = '''-----BEGIN\s+(RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED |)PRIVATE\s+KEY-----'''
+description = "PEM private key: the BEGIN line, then at least one key-body line (40+ base64 characters), after any blank lines, encryption header lines, escaped line breaks (one or two backslashes), quotes and the punctuation code puts between lines (# > + , ; ( [). No END line needed, so a truncated key is still refused; a header quoted alone in prose passes"
+regex = '''-----BEGIN\s+(RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED |)PRIVATE\s+KEY-----(?:\s|\\{1,2}[rn]|["'#>+,;(\[]|[A-Za-z-]+:[^\n\\]*)*?[A-Za-z0-9+/]{40,}'''
 keywords = ["BEGIN", "PRIVATE KEY"]
 tags = ["credential", "private-key"]
 
