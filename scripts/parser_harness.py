@@ -39,6 +39,12 @@ REQUIRED_COVERAGE_FLOOR = 0.80
 #   990EZ  -> reportable_comp_related_org / other_compensation MUST be NULL ; rcfo populated
 #   990PF  -> reportable_comp_related_org / other_compensation MUST be NULL ; rcfo populated
 _REQUIRED = "reportable_comp_filing_org"
+# What baseline_nullability_matrix reads: assert_baseline_green checks it exists before the scan, and refuses by name.
+_BASELINE_NEEDS = {
+    "officers": ["object_id", "benefits", "expense_account", "reportable_comp_related_org", "other_compensation",
+                 _REQUIRED],
+    "returns": ["object_id", "return_type"],
+}
 
 
 def baseline_nullability_matrix(conn: sqlite3.Connection) -> dict:
@@ -84,7 +90,21 @@ def assert_baseline_green(conn: sqlite3.Connection, log=print) -> bool:
              out an all-NULL table passing the first bound vacuously). Emits GATE_*
              markers grep-compatible with the build's existing gate logging.
     """
-    matrix = baseline_nullability_matrix(conn)
+    # Fail closed WITH A MESSAGE when the matrix can't be evaluated (relay datadawn pink #5 item 4): before this, a file
+    # with no officers table raised OperationalError, so promotion stopped only by accident of the exception.
+    for table, cols in _BASELINE_NEEDS.items():
+        if not _table_exists(conn, table):
+            log(f"GATE_BASELINE_RED: cannot evaluate — table {table} is missing")
+            return False
+        missing = _missing(conn, table, cols)
+        if missing:
+            log(f"GATE_BASELINE_RED: cannot evaluate — {table} lacks column(s) {', '.join(missing)}")
+            return False
+    try:
+        matrix = baseline_nullability_matrix(conn)
+    except sqlite3.Error as e:
+        log(f"GATE_BASELINE_RED: cannot evaluate — {type(e).__name__}: {e}")
+        return False
     if not matrix:
         log("GATE_BASELINE_RED: no 990/990EZ/990PF officer rows found — "
             "missing tables or empty DB")
@@ -1415,6 +1435,560 @@ def newfields_schema_drift_guard(conn, log=print) -> bool:
 
 # ── Invariant registry (the fail-closed core) ───────────────────────────────
 # What is IMPLEMENTED and registered: invariant key -> callable(conn, log) -> bool.
+# ── PASS 1 (Part IX + Part VIII) invariants (relay datadawn pink #2 item 4, step 2; schema manifest §K, 990project
+# 74d3846) ───────────────────────────────────────────────────────────────────────────────────────────────────────
+# Each identity is the form's own arithmetic on the filing (brief v2 §2), flagged per filing; the STOP is a band
+# (brief §5: "≥~94% reconcile within 1%; flag the rest, don't fail"). Structure defects (a duplicate, an orphan, a
+# non-numeric amount, a broken seq) and two-parser write disagreements (IX-W) stop at the first instance. An identity
+# with nothing to evaluate, an empty table or a missing table also stops: a check that can't see isn't green.
+# P-A (relay datadawn pink #1, session 99f98896; plan beab799 D2 to D5): each identity has its own stop and, where
+# Stage 0 measured one, a per-version stop (PASS1_STOPS); D2 evaluates IX-H only on allocated lines. D3 (split by the
+# drafter, relay datadawn pink #6): Part VIII line 12's consistency identity (VIII-L12C), the raw identity and the
+# per-line one are FLAGGED ONLY, with VIII-L12C counted per return version: Stage 0 found them filers' arithmetic,
+# parse faithful in 420/420. The parse is held instead by backfill_pass1.py's raw parity: the same identity on the
+# extractor's values and on the raw XML, per filing, zero tolerance. The pass-1 stage map
+# (_REQUIRED_BY_STAGE_PASS1, read by promotion_gate(..., program="pass1")) requires them with the witness check (D5).
+# main() does not run them yet: the monthly gate goes live with the public surfaces (plan §5, P-D).
+PASS1_TIE_ABS = 1             # dollars
+PASS1_TIE_REL = 0.01          # of the larger side
+# Each identity's STOP (overall) and PER-VERSION STOP (None = none): Stage 0's proposals, measured on 10,202 filings
+# (working-docs/parser_pass1_wiring_plan_2026-11-02_pink_fe2338a1_audit.md §4; STAGE0_FINDINGS (c)). ALL PROVISIONAL
+# until Stages 1-3 re-measure them. A per-version stop counts only versions with at least PASS1_VERSION_MIN_N evaluated
+# filings, read from returns.return_version.
+PASS1_STOPS = {
+    "IX-H": (0.94, None),          # brief §5's band; 2024v5.1's misses are filer patterns (findings (e)): no per-version stop
+    "IX-V": (0.999, 0.999),
+    "IX-X": (0.99, 0.995),
+    "VIII-V": (0.999, 0.999),
+    "VIII-X": (0.99, 0.995),
+    "VIII-S 1h": (0.99, 0.995),
+    "VIII-S 2g": (0.98, 0.985),
+    "VIII-S 11e": (0.98, 0.985),
+}
+PASS1_FLAG_ONLY = ("VIII-L12", "VIII-H", "VIII-L12C")   # D3: filers' arithmetic, not the parse. Logged, never a stop
+PASS1_VERSION_MIN_N = 100
+PASS1_FLAG_EXAMPLES = 10
+_P1_IX_AB = ("grants_domestic_orgs", "grants_domestic_individuals", "grants_foreign", "benefits_to_members")
+_P1_IX_AD = ("fees_prof_fundraising",)
+_P1_IX_ABCD = ("comp_current_officers", "comp_disqualified_persons", "other_salaries_wages", "pension_contributions",
+               "other_employee_benefits", "payroll_taxes", "fees_management", "fees_legal", "fees_accounting",
+               "fees_lobbying", "fees_investment_mgmt", "fees_other", "advertising", "office_expenses",
+               "information_technology", "royalties", "occupancy", "travel", "travel_public_officials",
+               "conferences_meetings", "interest", "payments_to_affiliates", "depreciation_depletion", "insurance",
+               "all_other_expenses")
+_P1_IX_COLS = {**{s: ("total", "program") for s in _P1_IX_AB}, **{s: ("total", "fundraising") for s in _P1_IX_AD},
+               **{s: ("total", "program", "mgmt", "fundraising") for s in _P1_IX_ABCD},
+               "total_functional_expenses": ("total", "program", "mgmt", "fundraising"),
+               "joint_costs": ("total", "program", "mgmt", "fundraising")}
+_P1_IX_LINES_1_24 = (*_P1_IX_AB, *_P1_IX_AD, *_P1_IX_ABCD)          # 24a-d come from the child table
+_P1_VIII_1AF = ("federated_campaigns", "membership_dues", "fundraising_events_contributions", "related_organizations",
+                "government_grants", "all_other_contributions")
+_P1_VIII_LINE12_PARTS = ("total_contributions", "total_program_service_revenue", "investment_income_total",
+                         "bond_proceeds_income_total", "royalties_revenue_total", "net_rental_income_total",
+                         "net_gain_investments_total", "net_fundraising_events_total", "net_gaming_total",
+                         "net_inventory_sales_total", "other_revenue_total")
+# Part VIII lines 2f-11d held in the wide table, each with its columns (A) to (D); line 8c has no column (B). With the
+# described lines 2a-e and 11a-c these are every line that line 12's columns (B) to (D) sum (D3).
+_P1_VIII_LINE_COLS = {**{s: ("total", "related_exempt", "unrelated", "excluded") for s in
+                         ("other_program_service", "investment_income", "bond_proceeds_income", "royalties_revenue",
+                          "net_rental_income", "net_gain_investments", "net_gaming", "net_inventory_sales",
+                          "misc_revenue")},
+                      "net_fundraising_events": ("total", None, "unrelated", "excluded")}
+_P1_C3C4 = ("03", "04", "3", "4")
+
+
+def _p1_tie(a, b):
+    return abs(a - b) <= max(PASS1_TIE_ABS, PASS1_TIE_REL * max(abs(a), abs(b)))
+
+
+def _p1_ixh_allocated(b, c, d):
+    """D2: a Part IX line is evaluated for IX-H only if it carries an allocation, a nonzero amount in column (B), (C)
+    or (D). A line whose (B) to (D) are blank, written zero, or a mix of the two is not evaluated: the filer allocated
+    nothing, whatever the software wrote. A dropped, swapped or misnamed column still changes nonzero values."""
+    return any(v is not None and v != 0 for v in (b, c, d))
+
+
+def _p1_examples(oids):
+    return (": " + ", ".join(oids[:PASS1_FLAG_EXAMPLES]) + (" …" if len(oids) > PASS1_FLAG_EXAMPLES else "")) if oids else ""
+
+
+def _p1_band(key, label, ev, bad, examples, log):
+    """ev, bad: return_version -> count. RED below the identity's overall stop, and below its per-version stop in any
+    version with at least PASS1_VERSION_MIN_N evaluated filings. Nothing to evaluate is RED (no vacuous pass)."""
+    stop, vstop = PASS1_STOPS[key]
+    n_eval, n_bad = sum(ev.values()), sum(bad.values())
+    if n_eval == 0:
+        log(f"P1 {key} {label}: RED — nothing to evaluate (an empty or misread table cannot pass a stop)")
+        return False
+    rate = (n_eval - n_bad) / n_eval
+    ok = rate >= stop
+    log(f"P1 {key} {label}: {n_eval - n_bad}/{n_eval} tie ({rate:.4f}; stop ≥ {stop}, provisional); "
+        f"flagged {n_bad}{_p1_examples(examples)} → {'OK' if ok else 'RED'}")
+    if vstop is not None:
+        for ver in sorted(ev, key=lambda v: (v is None, str(v))):
+            n = ev[ver]
+            if n < PASS1_VERSION_MIN_N:
+                continue
+            vr = (n - bad.get(ver, 0)) / n
+            if vr < vstop:
+                log(f"P1 {key} version {ver}: {n - bad.get(ver, 0)}/{n} tie ({vr:.4f}; per-version stop ≥ {vstop}, "
+                    f"provisional) → RED")
+                ok = False
+    return ok
+
+
+def _p1_flag(key, label, ev, bad, examples, log, per_version=False):
+    """A flag-only measure (D3): its rate and lowest version are logged, and with per_version a count for every return
+    version; it never stops a run."""
+    n_eval, n_bad = sum(ev.values()), sum(bad.values())
+    if n_eval == 0:
+        log(f"P1 {key} {label} (flag only, no stop): nothing evaluated → FLAG")
+        return
+    low = [(round((ev[v] - bad.get(v, 0)) / ev[v], 4), str(v)) for v in ev if ev[v] >= PASS1_VERSION_MIN_N]
+    lowest = f"; lowest version {min(low)[1]} {min(low)[0]:.4f}" if low else ""
+    log(f"P1 {key} {label} (flag only, no stop): {n_eval - n_bad}/{n_eval} tie ({(n_eval - n_bad) / n_eval:.4f}"
+        f"{lowest}); flagged {n_bad}{_p1_examples(examples)} → FLAG")
+    if per_version:
+        log(f"P1 {key} by version: " + "; ".join(f"{v} {ev[v] - bad.get(v, 0)}/{ev[v]}"
+                                                  for v in sorted(ev, key=lambda v: (v is None, str(v)))) + " → FLAG")
+
+
+def _p1_versions_readable(conn, log):
+    if "return_version" not in _columns(conn, "returns"):
+        log("P1 per-version stops: RED — returns.return_version is missing, so no per-version stop can be read")
+        return False
+    return True
+
+
+def _p1_structure(conn, table, amount_cols, parts, log):
+    """Presence, non-empty, one row per object_id, every object_id a Form 990 return, amounts numeric or NULL, and
+    the child table's parts and seq well formed. Any defect stops (zero tolerance)."""
+    for t in (table, "returns_described_lines"):
+        if not _table_exists(conn, t):
+            log(f"P1 structure: RED — {t} is missing"); return False
+    n, nd = conn.execute(f"SELECT COUNT(*), COUNT(DISTINCT object_id) FROM {table}").fetchone()
+    if n == 0:
+        log(f"P1 structure: RED — {table} is empty"); return False
+    if n != nd:
+        log(f"P1 structure: RED — {table} has {n - nd} duplicate object_id row(s)"); return False
+    orph = conn.execute(f"SELECT COUNT(*) FROM {table} t WHERE NOT EXISTS (SELECT 1 FROM returns r "
+                        f"WHERE r.object_id = t.object_id AND r.return_type = '990')").fetchone()[0]
+    if orph:
+        log(f"P1 structure: RED — {orph} {table} row(s) are not a Form 990 return"); return False
+    have = _columns(conn, table)
+    missing = [c for c in amount_cols if c not in have]
+    if missing:
+        log(f"P1 structure: RED — {table} lacks {len(missing)} manifest column(s): {missing[:5]}"); return False
+    bad_type = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE " + " OR ".join(
+        f"typeof({c}) NOT IN ('integer','real','null')" for c in amount_cols)).fetchone()[0]
+    if bad_type:
+        log(f"P1 structure: RED — {bad_type} {table} row(s) hold a non-numeric amount"); return False
+    ph = ",".join("?" * len(parts))
+    dl = conn.execute(f"SELECT COUNT(*) FROM (SELECT object_id, part FROM returns_described_lines WHERE part IN ({ph}) "
+                      f"GROUP BY object_id, part HAVING MIN(seq) <> 1 OR MAX(seq) <> COUNT(*) "
+                      f"OR COUNT(DISTINCT seq) <> COUNT(*))", parts).fetchone()[0]
+    if dl:
+        log(f"P1 structure: RED — {dl} described-line set(s) with a seq that does not run 1..n"); return False
+    dt = conn.execute(f"SELECT COUNT(*) FROM returns_described_lines WHERE part IN ({ph}) AND (" + " OR ".join(
+        f"typeof({c}) NOT IN ('integer','real','null')" for c in ("col_a", "col_b", "col_c", "col_d")) + ")", parts).fetchone()[0]
+    if dt:
+        log(f"P1 structure: RED — {dt} described line(s) hold a non-numeric amount"); return False
+    log(f"P1 structure: OK — {table}: {n} rows, unique, all Form 990, amounts numeric or NULL; described lines well formed")
+    return True
+
+
+def _p1_described(conn, part):
+    out = {}
+    for oid, a, b, c, d in conn.execute("SELECT object_id, col_a, col_b, col_c, col_d FROM returns_described_lines "
+                                        "WHERE part = ? ORDER BY object_id, seq", (part,)):
+        out.setdefault(oid, []).append((a, b, c, d))
+    return out
+
+
+def pass1_part_ix_reconciliation(conn, log=print) -> bool:
+    """Part IX (returns_expenses + described lines IX_24), manifest §K: IX-H, IX-V, IX-X with their stops and per-version
+    stops, IX-W and structure at zero tolerance."""
+    from collections import Counter
+    cols = [f"{s}_{c}" for s, cs in _P1_IX_COLS.items() for c in cs]
+    if not _p1_structure(conn, "returns_expenses", cols, ("IX_24",), log):
+        return False
+    if not _p1_versions_readable(conn, log):
+        return False
+    if not _table_exists(conn, "bmf"):
+        log("P1 IX-H: RED — bmf is missing, so the (c)(3)/(c)(4) scope (#81) cannot be read"); return False
+    sub = dict(conn.execute("SELECT r.object_id, b.subsection FROM returns_expenses r LEFT JOIN bmf b ON b.ein = r.ein"))
+    ret = {o: (te, tf, pe, me, fe, ver) for o, te, tf, pe, me, fe, ver in conn.execute(
+        "SELECT object_id, total_expenses, total_functional_expenses, program_expenses, management_expenses, "
+        "fundraising_expenses, return_version FROM returns WHERE return_type = '990'")}
+    d24 = _p1_described(conn, "IX_24")
+    ev = {k: Counter() for k in ("IX-H", "IX-V", "IX-X")}
+    bad = {k: Counter() for k in ev}
+    ex = {k: [] for k in ev}
+    w_bad = []
+
+    def miss(k, ver, oid):
+        bad[k][ver] += 1
+        if len(ex[k]) < PASS1_FLAG_EXAMPLES + 1:
+            ex[k].append(oid)
+
+    cur = conn.execute(f"SELECT object_id, {', '.join(cols)} FROM returns_expenses")
+    for row in cur:
+        oid, vals = row[0], dict(zip(cols, row[1:]))
+        r = ret.get(oid)
+        ver = r[5] if r is not None else None
+        lines = [(vals.get(f"{s}_total"), *(vals.get(f"{s}_{c}") for c in ("program", "mgmt", "fundraising")))
+                 for s in _P1_IX_COLS if s not in ("total_functional_expenses", "joint_costs")] + d24.get(oid, [])
+        if (sub.get(oid) or "") in _P1_C3C4:
+            evald = [(a, b, c, d) for a, b, c, d in lines if _p1_ixh_allocated(b, c, d)]
+            if evald:
+                ev["IX-H"][ver] += 1
+                if any(a is None or not _p1_tie(a, (b or 0) + (c or 0) + (d or 0)) for a, b, c, d in evald):
+                    miss("IX-H", ver, oid)
+        l25 = vals.get("total_functional_expenses_total")
+        if l25 is not None:
+            ev["IX-V"][ver] += 1
+            s = sum(vals.get(f"{s}_total") or 0 for s in _P1_IX_LINES_1_24) + sum((a or 0) for a, _, _, _ in d24.get(oid, []))
+            if not _p1_tie(s, l25):
+                miss("IX-V", ver, oid)
+            te = r[0] if r is not None else None
+            if te is not None:
+                ev["IX-X"][ver] += 1
+                if not _p1_tie(l25, te):
+                    miss("IX-X", ver, oid)
+        mine = tuple(vals.get(f"total_functional_expenses_{c}") for c in ("total", "program", "mgmt", "fundraising"))
+        if r is None or mine != tuple(r[1:5]):
+            w_bad.append(oid)
+    ok = _p1_band("IX-H", "B+C+D=A per allocated line, (c)(3)/(c)(4)", ev["IX-H"], bad["IX-H"], ex["IX-H"], log)
+    ok = _p1_band("IX-V", "lines 1-24 sum to line 25 (A)", ev["IX-V"], bad["IX-V"], ex["IX-V"], log) and ok
+    ok = _p1_band("IX-X", "line 25 (A) = Part I line 18", ev["IX-X"], bad["IX-X"], ex["IX-X"], log) and ok
+    if w_bad:
+        log(f"P1 IX-W: RED — line 25 differs from returns' own four columns on {len(w_bad)} filing(s) (two parsers, "
+            f"one element: a write defect): {', '.join(w_bad[:PASS1_FLAG_EXAMPLES])}")
+        ok = False
+    else:
+        log("P1 IX-W: OK — line 25 equals returns' own four columns on every filing")
+    return ok
+
+
+def pass1_part_viii_reconciliation(conn, log=print) -> bool:
+    """Part VIII (returns_revenue + described lines VIII_2, VIII_11), manifest §K: VIII-V, VIII-X and VIII-S with their
+    stops and per-version stops; D3's consistency identity VIII-L12C (counted per version), raw VIII-L12 and the per-line
+    VIII-H flagged only; structure at zero tolerance."""
+    from collections import Counter
+    line_cols = [f"{s}_{c}" for s, cs in _P1_VIII_LINE_COLS.items() for c in cs if c]
+    cols = list(dict.fromkeys([*_P1_VIII_1AF, "noncash_contributions", *_P1_VIII_LINE12_PARTS,
+                               "total_revenue_total", "total_revenue_related_exempt", "total_revenue_unrelated",
+                               "total_revenue_excluded", *line_cols]))
+    if not _p1_structure(conn, "returns_revenue", cols, ("VIII_2", "VIII_11"), log):
+        return False
+    if not _p1_versions_readable(conn, log):
+        return False
+    ret = {o: (tr, ver) for o, tr, ver in conn.execute(
+        "SELECT object_id, total_revenue, return_version FROM returns WHERE return_type = '990'")}
+    d2, d11 = _p1_described(conn, "VIII_2"), _p1_described(conn, "VIII_11")
+    keys = ("VIII-V", "VIII-X", "VIII-S 1h", "VIII-S 2g", "VIII-S 11e", "VIII-L12C", "VIII-L12", "VIII-H")
+    ev = {k: Counter() for k in keys}
+    bad = {k: Counter() for k in keys}
+    ex = {k: [] for k in keys}
+
+    def miss(k, ver, oid):
+        bad[k][ver] += 1
+        if len(ex[k]) < PASS1_FLAG_EXAMPLES + 1:
+            ex[k].append(oid)
+
+    cur = conn.execute(f"SELECT object_id, {', '.join(cols)} FROM returns_revenue")
+    for row in cur:
+        oid, v = row[0], dict(zip(cols, row[1:]))
+        g = lambda k: v.get(k) or 0
+        r = ret.get(oid)
+        ver = r[1] if r is not None else None
+        # Lines 2 to 11 as (A, B, C, D): the described lines 2a-e and 11a-c, and lines 2f to 11d of the wide table.
+        lines = list(d2.get(oid, [])) + list(d11.get(oid, [])) + [
+            tuple(v.get(f"{s}_{c}") if c else None for c in cs) for s, cs in _P1_VIII_LINE_COLS.items()]
+        a12 = v.get("total_revenue_total")
+        b12, c12, d12 = (v.get(f"total_revenue_{c}") for c in ("related_exempt", "unrelated", "excluded"))
+        if a12 is not None:
+            ev["VIII-V"][ver] += 1
+            if not _p1_tie(sum(g(k) for k in _P1_VIII_LINE12_PARTS), a12):
+                miss("VIII-V", ver, oid)
+            ev["VIII-L12"][ver] += 1
+            if not _p1_tie(g("total_contributions") + (b12 or 0) + (c12 or 0) + (d12 or 0), a12):
+                miss("VIII-L12", ver, oid)
+            # D3: line 12's own gap equals the summed gaps of lines 2-11, where a line's gap is A - (B + C + D). A filer
+            # who leaves a line's (B) to (D) short leaves line 12's short by the same amount, so this ties; a parse
+            # that drops or misreads one line's column doesn't. Filings with line 12's (B) to (D) all blank are not
+            # evaluated until their read (STAGE0_FINDINGS (a): 148 filings) says they may join.
+            if any(x is not None for x in (b12, c12, d12)):
+                ev["VIII-L12C"][ver] += 1
+                gap12 = a12 - (g("total_contributions") + (b12 or 0) + (c12 or 0) + (d12 or 0))
+                gaps = sum((a or 0) - ((b or 0) + (c or 0) + (d or 0)) for a, b, c, d in lines)
+                if not _p1_tie(gap12, gaps):
+                    miss("VIII-L12C", ver, oid)
+            if r is not None and r[0] is not None:
+                ev["VIII-X"][ver] += 1
+                if not _p1_tie(a12, r[0]):
+                    miss("VIII-X", ver, oid)
+        filled = [(a, b, c, d) for a, b, c, d in lines if any(x is not None for x in (b, c, d))]
+        if filled:
+            ev["VIII-H"][ver] += 1
+            if any(not _p1_tie(a or 0, (b or 0) + (c or 0) + (d or 0)) for a, b, c, d in filled):
+                miss("VIII-H", ver, oid)
+        if v.get("total_contributions") is not None:
+            ev["VIII-S 1h"][ver] += 1
+            if not _p1_tie(sum(g(k) for k in _P1_VIII_1AF), v["total_contributions"]):
+                miss("VIII-S 1h", ver, oid)
+        if v.get("total_program_service_revenue") is not None or oid in d2:
+            ev["VIII-S 2g"][ver] += 1
+            if not _p1_tie(sum((a or 0) for a, *_ in d2.get(oid, [])) + g("other_program_service_total"),
+                           g("total_program_service_revenue")):
+                miss("VIII-S 2g", ver, oid)
+        if v.get("other_revenue_total") is not None or oid in d11:
+            ev["VIII-S 11e"][ver] += 1
+            if not _p1_tie(sum((a or 0) for a, *_ in d11.get(oid, [])) + g("misc_revenue_total"),
+                           g("other_revenue_total")):
+                miss("VIII-S 11e", ver, oid)
+    labels = {"VIII-V": "line 12 (A) = the sum of its parts", "VIII-X": "line 12 (A) = Part I line 12",
+              "VIII-S 1h": "1h = 1a+...+1f", "VIII-S 2g": "2g = 2a-2f (A)", "VIII-S 11e": "11e = 11a-11d (A)",
+              "VIII-L12C": "line 12's gap A - (1h + B + C + D) = the summed gaps of lines 2-11"}
+    ok = True
+    for k in ("VIII-V", "VIII-X", "VIII-S 1h", "VIII-S 2g", "VIII-S 11e"):
+        ok = _p1_band(k, labels[k], ev[k], bad[k], ex[k], log) and ok
+    _p1_flag("VIII-L12C", labels["VIII-L12C"], ev["VIII-L12C"], bad["VIII-L12C"], ex["VIII-L12C"], log, per_version=True)
+    _p1_flag("VIII-L12", "line 12: A = 1h + B + C + D (raw)", ev["VIII-L12"], bad["VIII-L12"], ex["VIII-L12"], log)
+    _p1_flag("VIII-H", "B+C+D=A per line, lines 2-11", ev["VIII-H"], bad["VIII-H"], ex["VIII-H"], log)
+    return ok
+
+
+# ── Q1: Part IX's presence floors (P-B; purple 3ed4f84f's Q1; the drafter's call, relay datadawn pink #6 item 3 and #7) ──
+# Part IX's columns B to D could vanish for a whole version (a schema rename) and every check above would still pass.
+# Per return version, the share of filings with a NONZERO value in column B, C and D, each separately, over lines 1-24
+# and the described lines 24a-e (line 25 excluded; IX-W holds it). Nonzero (PQ1, the drafter's call, relay datadawn
+# pink #10 item 1): a fault that zero-fills a column is caught as well as one that drops it; the any-value share is
+# logged beside it as a diagnostic, so the two read differently. Floors from Stage 0's nonzero spread (half the lowest
+# stable version's share): B 0.39, C 0.28, D 0.068, all filers, on every version with at least PASS1_VERSION_MIN_N
+# filings at that stage, new versions included; smaller versions are reported only. Stages 1-3 REPORT them
+# (pass1_ix_presence_report), with D's margin in standard deviations at each version's size; Stage 4 BINDS them.
+PASS1_PRESENCE_FLOORS = {"B": 0.39, "C": 0.28, "D": 0.068}
+_P1_PRESENCE_COLS = {"B": ("program", "col_b"), "C": ("mgmt", "col_c"), "D": ("fundraising", "col_d")}
+
+
+def pass1_ix_presence_floors(conn, log=print, bind=True) -> bool:
+    """bind=True (Stage 4): RED when any version with >= PASS1_VERSION_MIN_N filings has a column under its floor.
+    bind=False (Stages 1-3): the same lines, marked BELOW FLOOR, and green unless the data can't be read."""
+    from collections import Counter
+    for t in ("returns_expenses", "returns_described_lines"):
+        if not _table_exists(conn, t):
+            log(f"P1 IX-P presence: RED — {t} is missing, so presence can't be read"); return False
+    if not _p1_versions_readable(conn, log):
+        return False
+    have = _columns(conn, "returns_expenses")
+    cols = {L: [f"{s}_{suf}" for s in _P1_IX_LINES_1_24 if f"{s}_{suf}" in have] for L, (suf, _) in _P1_PRESENCE_COLS.items()}
+    allc = sorted({c for v in cols.values() for c in v})
+    ver = dict(conn.execute("SELECT object_id, return_version FROM returns WHERE return_type = '990'"))
+    desc = {L: {o for (o,) in conn.execute(f"SELECT DISTINCT object_id FROM returns_described_lines WHERE part = 'IX_24' "
+                                          f"AND {dcol} IS NOT NULL AND {dcol} <> 0")} for L, (_, dcol) in _P1_PRESENCE_COLS.items()}
+    desc_any = {L: {o for (o,) in conn.execute(f"SELECT DISTINCT object_id FROM returns_described_lines WHERE part = 'IX_24' "
+                                              f"AND {dcol} IS NOT NULL")} for L, (_, dcol) in _P1_PRESENCE_COLS.items()}
+    n, has, has_any = Counter(), {L: Counter() for L in _P1_PRESENCE_COLS}, {L: Counter() for L in _P1_PRESENCE_COLS}
+    for row in conn.execute(f"SELECT object_id{''.join(', ' + c for c in allc)} FROM returns_expenses"):
+        oid, v = row[0], dict(zip(allc, row[1:]))
+        k = ver.get(oid)
+        n[k] += 1
+        for L in _P1_PRESENCE_COLS:
+            if oid in desc[L] or any(v[c] is not None and v[c] != 0 for c in cols[L]):
+                has[L][k] += 1
+            if oid in desc_any[L] or any(v[c] is not None for c in cols[L]):
+                has_any[L][k] += 1
+    if not n:
+        log("P1 IX-P presence: RED — nothing to evaluate"); return False
+    ok = True
+    for k in sorted(n, key=lambda v: (v is None, str(v))):
+        shares = {L: has[L][k] / n[k] for L in _P1_PRESENCE_COLS}
+        anys = {L: has_any[L][k] / n[k] for L in _P1_PRESENCE_COLS}
+        sd = (shares["D"] * (1 - shares["D"]) / n[k]) ** 0.5
+        margin = (f"D margin {(shares['D'] - PASS1_PRESENCE_FLOORS['D']) / sd:.1f} sd" if sd > 0 else
+                  f"D margin {'none: D is 0' if shares['D'] == 0 else 'unbounded: D is 1'}")
+        text = ", ".join(f"{L} {shares[L]:.4f} (any {anys[L]:.4f})" for L in _P1_PRESENCE_COLS) + f"; {margin}"
+        if n[k] < PASS1_VERSION_MIN_N:
+            log(f"P1 IX-P presence version {k}: {text} (n={n[k]}) — reported only (under {PASS1_VERSION_MIN_N} filings)")
+            continue
+        low = [L for L in _P1_PRESENCE_COLS if shares[L] < PASS1_PRESENCE_FLOORS[L]]
+        for L in low:
+            log(f"P1 IX-P presence version {k} column {L}: {shares[L]:.4f} nonzero (any value {anys[L]:.4f}) under its floor {PASS1_PRESENCE_FLOORS[L]} "
+                f"(n={n[k]}) → {'RED' if bind else 'BELOW FLOOR (reported; it binds at Stage 4)'}")
+        if not low:
+            log(f"P1 IX-P presence version {k}: {text} (n={n[k]}) → OK")
+        if low and bind:
+            ok = False
+    return ok
+
+
+# ── Pass 1's witness check (D5): its own artifact, per-value provenance, and the sign-off bound to a hash ──────────────
+# §823 and §823 A1: maintainer transcribes the 91 deciding cells blind; the other values rest on two machine legs that agree.
+# `transcribed_blind` may be set only on what he transcribes. The sign-off carries fixtures_sha256, the sha256 of the
+# fixtures in a canonical serialization (sorted keys, fixed separators), so reformatting the file keeps the sign-off and
+# changing any value voids it. Band 1's artifact and _witness_artifact_signed are unchanged.
+PASS1_WITNESS_PATH = Path(__file__).resolve().parent / "witness_fixtures_990_pass1.json"
+# The record of maintainer's sign-off, PINNED OUTSIDE THE ARTIFACT (relay datadawn pink #4 item 1; purple 3ed4f84f's S1, S2):
+# (fixtures_sha256, reviewer, the decisions-log section recording his signature). Set in ONE line, its own landing,
+# only from that decisions-log section, after he signs. Empty, the check reads UNSIGNED. The file's own fixtures_sha256
+# and reviewer must equal the pin: an editor who rewrites the file's hash, or names another reviewer, can't pass.
+PASS1_WITNESS_PIN = None
+_P1W_PROVENANCE = ("transcribed_blind", "two_machine_legs")
+_P1W_TABLES = ("returns_expenses", "returns_revenue")
+
+
+def pass1_fixtures_sha256(fixtures) -> str:
+    import hashlib, json
+    blob = json.dumps(fixtures, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _p1w_described_cell(fx, ref):
+    """ref like 'IX_24 seq 4: description, col_a' -> [the fields' values] of that described line, or None if absent."""
+    head, fields = ref.split(":", 1)
+    part, seq = head.split(" seq ")
+    d = next((d for d in fx.get("described") or [] if d.get("part") == part.strip() and d.get("seq") == int(seq)), None)
+    return None if d is None else [d.get(f.strip()) for f in fields.split(",")]
+
+
+def _p1w_cell(fx, table, col):
+    if table == "returns_described_lines":
+        return _p1w_described_cell(fx, col)
+    return (fx.get("expected") or {}).get(table, {}).get(col)          # absent key = NULL
+
+
+def _p1w_signed(art, log) -> bool:
+    """RED unless the artifact is complete, signed, unchanged since the sign-off, and its transcription decides every
+    requirement with maintainer's value equal to the two machine legs'."""
+    if not art:
+        log("GATE_P1WIT_RED: no pass-1 witness artifact (witness_fixtures_990_pass1.json) — fail-closed")
+        return False
+    pin = PASS1_WITNESS_PIN
+    if not pin:
+        log("GATE_P1WIT_RED: UNSIGNED — no sign-off is pinned in the harness (PASS1_WITNESS_PIN is empty); it is set "
+            "only from the decisions-log record of maintainer's signature (§823)")
+        return False
+    if not (isinstance(pin, (tuple, list)) and len(pin) == 3 and all(isinstance(x, str) and x for x in pin)
+            and len(pin[0]) == 64 and all(c in "0123456789abcdef" for c in pin[0])):
+        log("GATE_P1WIT_RED: PASS1_WITNESS_PIN is malformed — it must be (fixtures_sha256 as 64 lowercase hex, "
+            "reviewer, the decisions-log section)")
+        return False
+    pin_sha, pin_reviewer, pin_record = pin
+    so = art.get("signoff") or {}
+    missing = [k for k in ("reviewer", "date", "attestation", "fixtures_sha256") if not so.get(k)]
+    if missing:
+        log(f"GATE_P1WIT_RED: UNSIGNED — the sign-off lacks {', '.join(missing)} (§823: maintainer's transcription and "
+            f"sign-off come first)")
+        return False
+    fx_all = art.get("fixtures") or []
+    if not fx_all:
+        log("GATE_P1WIT_RED: a signed artifact with 0 fixtures certifies nothing (fail-closed)")
+        return False
+    if pass1_fixtures_sha256(fx_all) != so["fixtures_sha256"]:
+        log("GATE_P1WIT_RED: the fixtures changed after the sign-off (fixtures_sha256 does not match) — reads as UNSIGNED")
+        return False
+    if so["fixtures_sha256"] != pin_sha:
+        log(f"GATE_P1WIT_RED: these fixtures are not the ones maintainer signed: the pinned fixtures_sha256 ({pin_record}) is "
+            f"{pin_sha[:16]}…, this file's is {so['fixtures_sha256'][:16]}… — reads as UNSIGNED")
+        return False
+    if so["reviewer"] != pin_reviewer:
+        log(f"GATE_P1WIT_RED: the file names reviewer {so['reviewer']!r}; the pinned record ({pin_record}) names "
+            f"{pin_reviewer!r}, and the pinned record decides")
+        return False
+    decided = set()
+    for fx in fx_all:
+        oid = fx.get("object_id")
+        if not fx.get("source") or not fx.get("covers"):
+            log(f"GATE_P1WIT_RED: fixture {oid!r} lacks its source or its covers"); return False
+        prov = fx.get("provenance") or {}
+        values = {f"{t}.{c}" for t in _P1W_TABLES for c in ((fx.get("expected") or {}).get(t) or {})}
+        if set(prov) != values:
+            log(f"GATE_P1WIT_RED: fixture {oid!r}: {len(values - set(prov))} value(s) without a provenance, "
+                f"{len(set(prov) - values)} provenance(s) without a value"); return False
+        odd = sorted({p for p in prov.values() if p not in _P1W_PROVENANCE})
+        if odd:
+            log(f"GATE_P1WIT_RED: fixture {oid!r}: unknown provenance {odd}"); return False
+        transcribed = set()
+        for row in fx.get("transcription") or []:
+            stored, got = row.get("stored") or [], row.get("values")
+            if not stored or got is None or len(got) != len(stored):
+                log(f"GATE_P1WIT_RED: fixture {oid!r} row {row.get('row')}: not transcribed"); return False
+            for (t, c), v in zip(stored, got):
+                want = _p1w_cell(fx, t, c)
+                if v != want:
+                    log(f"GATE_P1WIT_RED: fixture {oid!r} row {row.get('row')} {t}.{c}: the transcription {v!r} differs "
+                        f"from the two machine legs' {want!r} — investigate, never pick one"); return False
+                key = f"{t}.{c}"
+                if key in prov and prov[key] != "transcribed_blind":
+                    log(f"GATE_P1WIT_RED: fixture {oid!r} {key} decides a requirement but is marked {prov[key]!r}; "
+                        f"a deciding cell must be transcribed_blind"); return False
+                transcribed.add(key)
+            decided |= set(row.get("requirements") or [])
+        unearned = sorted(k for k, p in prov.items() if p == "transcribed_blind" and k not in transcribed)
+        if unearned:
+            log(f"GATE_P1WIT_RED: fixture {oid!r}: transcribed_blind on {len(unearned)} value(s) nobody transcribed "
+                f"(§823: only on what maintainer transcribes): {unearned[:3]}"); return False
+        undecided = sorted(set(fx["covers"]) - {q for row in fx.get("transcription") or [] for q in row.get("requirements") or []})
+        if undecided:
+            log(f"GATE_P1WIT_RED: fixture {oid!r}: {len(undecided)} requirement(s) with no deciding cell: {undecided[:3]}")
+            return False
+    total = art.get("requirements_total")
+    if not total or len(decided) != total:
+        log(f"GATE_P1WIT_RED: {len(decided)} requirement(s) decided, the artifact names {total!r}"); return False
+    return True
+
+
+def pass1_witnesses(conn, log=print, artifact=None) -> bool:
+    """Pass 1's witness set re-asserted against THIS DB: the signed artifact (_p1w_signed), then every witness value,
+    every deciding absence and every described line equal to the stored rows. Fail-closed on anything missing."""
+    import json
+    art = artifact
+    if art is None:
+        try:
+            art = json.loads(PASS1_WITNESS_PATH.read_text()) if PASS1_WITNESS_PATH.exists() else None
+        except Exception as e:
+            log(f"GATE_P1WIT_RED: cannot read {PASS1_WITNESS_PATH.name}: {e} (fail-closed)"); return False
+    if not _p1w_signed(art, log):
+        return False
+    for t in (*_P1W_TABLES, "returns_described_lines"):
+        if not _table_exists(conn, t):
+            log(f"GATE_P1WIT_RED: {t} is missing — nothing to witness (fail-closed)"); return False
+    checks = 0
+    green = True
+    for fx in art["fixtures"]:
+        oid = fx["object_id"]
+        for t in _P1W_TABLES:
+            cur = conn.execute(f"SELECT * FROM {t} WHERE object_id = ?", (oid,))
+            names = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+            if len(rows) != 1:
+                log(f"GATE_P1WIT_RED: witness {oid} has {len(rows)} row(s) in {t}, not 1"); green = False; continue
+            got = dict(zip(names, rows[0]))
+            want = dict((fx.get("expected") or {}).get(t) or {})
+            for row in fx.get("transcription") or []:          # the deciding absences: written BLANK, stored NULL
+                for (tt, c) in row.get("stored") or []:
+                    if tt == t and c not in want:
+                        want[c] = None
+            for c, w in want.items():
+                checks += 1
+                if c not in got:
+                    log(f"GATE_P1WIT_RED: {t}.{c} absent — can't witness {oid}"); green = False
+                elif got[c] != w:
+                    log(f"GATE_P1WIT_RED: {oid} {t}.{c} stored {got[c]!r} != witness {w!r}"); green = False
+        keep = ("part", "seq", "description", "business_code", "col_a", "col_b", "col_c", "col_d")
+        db = [tuple(r) for r in conn.execute(f"SELECT {', '.join(keep)} FROM returns_described_lines WHERE object_id = ? "
+                                             "ORDER BY part, seq", (oid,))]
+        wd = sorted(tuple(d.get(k) for k in keep) for d in fx.get("described") or [])
+        checks += len(wd)
+        if db != wd:
+            log(f"GATE_P1WIT_RED: {oid} described lines stored {len(db)} differ from the witness's {len(wd)}"); green = False
+    if green:
+        log(f"GATE_P1WIT_GREEN: {checks} witness checks match ({len(art['fixtures'])} filings; signed by "
+            f"{PASS1_WITNESS_PIN[1]} ({PASS1_WITNESS_PIN[2]}), fixtures_sha256 {PASS1_WITNESS_PIN[0][:16]}… pinned)")
+    return green
+
+
 _REGISTERED_INVARIANTS = {
     "baseline_comp_nullability": assert_baseline_green,
     "newfields_reconciliation": newfields_reconciliation,
@@ -1426,6 +2000,14 @@ _REGISTERED_INVARIANTS = {
     # Band-1 remainder (registered 2026-07-19, port session)
     "band1_reconciliation": band1_reconciliation,
     "band1_witnesses": band1_witnesses,
+    # Pass 1 (Part IX + Part VIII; registered 2026-11-01, relay datadawn pink #2; the witness check added by P-A, relay
+    # datadawn pink #1 of session 99f98896): required by the pass-1 stage map below, not by Band 1's, and not run by main().
+    "pass1_part_ix_reconciliation": pass1_part_ix_reconciliation,
+    "pass1_part_viii_reconciliation": pass1_part_viii_reconciliation,
+    "pass1_witnesses": pass1_witnesses,
+    # Q1's presence floors (P-B): reported at Stages 1-3, binding at Stage 4.
+    "pass1_ix_presence_report": lambda conn, log=print: pass1_ix_presence_floors(conn, log=log, bind=False),
+    "pass1_ix_presence": pass1_ix_presence_floors,
 }
 
 # What each stage REQUIRES before it may promote. Stages >= 1 require the new-field
@@ -1462,8 +2044,22 @@ _REQUIRED_BY_STAGE = {
     4: ["baseline_comp_nullability", *_NEWFIELD_INVARIANTS],
 }
 
+# Pass 1's own stage map (plan beab799 D4), read by promotion_gate(conn, stage, program="pass1"). Band 1's map above and
+# its callers are unchanged. Stage 0 is the fixture corpus (nothing required); Stages 1 to 4 each require the baseline,
+# both pass-1 invariants and the pass-1 witness check (D5), so no pass-1 stage promotes before maintainer's signed
+# transcription (§823).
+_PASS1_INVARIANTS = ["pass1_part_ix_reconciliation", "pass1_part_viii_reconciliation", "pass1_witnesses"]
+_REQUIRED_BY_STAGE_PASS1 = {
+    0: [],
+    1: ["baseline_comp_nullability", *_PASS1_INVARIANTS, "pass1_ix_presence_report"],
+    2: ["baseline_comp_nullability", *_PASS1_INVARIANTS, "pass1_ix_presence_report"],
+    3: ["baseline_comp_nullability", *_PASS1_INVARIANTS, "pass1_ix_presence_report"],
+    4: ["baseline_comp_nullability", *_PASS1_INVARIANTS, "pass1_ix_presence"],   # Q1's floors bind here
+}
+_STAGE_MAPS = {None: _REQUIRED_BY_STAGE, "pass1": _REQUIRED_BY_STAGE_PASS1}
 
-def promotion_gate(conn: sqlite3.Connection, stage: int, log=print) -> None:
+
+def promotion_gate(conn: sqlite3.Connection, stage: int, log=print, program=None) -> None:
     """HARD, FAIL-CLOSED precondition on promoting a stage. Raises SystemExit unless
     EVERY invariant that stage REQUIRES is both registered AND green.
 
@@ -1473,12 +2069,19 @@ def promotion_gate(conn: sqlite3.Connection, stage: int, log=print) -> None:
     happens to know. There is no "wave it through": a SystemExit cannot be overridden
     by momentum, and an empty/partial invariant set refuses rather than greenlights.
     Mirrors the build_gated()/GATE_HOLD idiom.
+
+    program: None reads Band 1's map (_REQUIRED_BY_STAGE), as every caller before pass 1 does; "pass1" reads
+    _REQUIRED_BY_STAGE_PASS1 (plan beab799 D4). Any other value refuses.
     """
-    required = _REQUIRED_BY_STAGE.get(stage)
+    if program not in _STAGE_MAPS:
+        raise SystemExit(
+            f"GATE_HOLD: unknown program {program!r} — refusing (fail-closed; declare its stage map in _STAGE_MAPS)."
+        )
+    required = _STAGE_MAPS[program].get(stage)
     if required is None:
         raise SystemExit(
-            f"GATE_HOLD: unknown stage {stage!r} — refusing (fail-closed; declare it "
-            f"in _REQUIRED_BY_STAGE before use)."
+            f"GATE_HOLD: unknown stage {stage!r}{'' if program is None else f' for program {program!r}'} — refusing "
+            f"(fail-closed; declare it in {'_REQUIRED_BY_STAGE' if program is None else '_REQUIRED_BY_STAGE_PASS1'} before use)."
         )
     for key in required:
         check = _REGISTERED_INVARIANTS.get(key)
@@ -1492,8 +2095,8 @@ def promotion_gate(conn: sqlite3.Connection, stage: int, log=print) -> None:
             raise SystemExit(
                 f"GATE_HOLD: invariant '{key}' RED — refusing to promote to stage {stage}."
             )
-    log(f"GATE_PROMOTE_OK: stage {stage} — all required invariants registered + green "
-        f"({', '.join(required) or 'none'}).")
+    log(f"GATE_PROMOTE_OK: stage {stage}{'' if program is None else f' ({program})'} — all required invariants "
+        f"registered + green ({', '.join(required) or 'none'}).")
 
 
 def raw_name_fidelity_gate(log=print) -> bool:

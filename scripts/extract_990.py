@@ -330,6 +330,20 @@ def _tag(name):
     return f"{{{NS}}}{name}"
 
 
+def add_ns_if_missing(root):
+    """Put the efile namespace on every element of a file whose root has none; a namespaced
+    file is returned untouched. IRS batch 2026_TEOS_XML_09A shipped 321 of its 36,118 files
+    with a bare <Return> root (no xmlns), and every _tag() lookup missed them, so they parsed
+    to all-blank rows (2026-11-01; relay datadawn orange #1 item 1). Test:
+    test_parse_without_namespace.py. Same helper in extract_990pf_detail.py and
+    extract_990_detail.py."""
+    if isinstance(root.tag, str) and not root.tag.startswith("{"):
+        for el in root.iter():
+            if isinstance(el.tag, str) and not el.tag.startswith("{"):
+                el.tag = f"{{{NS}}}{el.tag}"
+    return root
+
+
 def find_text(el, dotted_path):
     """Walk a dot-separated path of element names under `el`, return text."""
     if el is None:
@@ -675,6 +689,61 @@ EXTRACTORS = {
 }
 
 
+UNREAD_QUERY = "SELECT object_id, source_file, parse_error FROM returns WHERE parse_error IS NOT NULL ORDER BY object_id"
+
+
+def unread_reason(root, row):
+    """A file that yields none of the expected tags, or a blank EIN, is a per-file parse error (relay datadawn orange #1
+    item 1(h); purple d8ee588a's review, governance 8acb93b). Before this, such a file parsed to an all-blank row with
+    parse_error None: the 321 bare-root files of batch 2026_TEOS_XML_09A did exactly that on 2026-11-01.
+    -> a reason starting "UNREAD:", or None. Test: test_unread_file_refusal.py."""
+    if root.find(_tag("ReturnHeader")) is None:
+        return "UNREAD: no ReturnHeader (none of the expected tags; another namespace or not a return)"
+    rt = (row.get("return_type") or "").strip()
+    if not rt:
+        return "UNREAD: no ReturnHeader/ReturnTypeCd"
+    if not (row.get("ein") or "").strip():
+        return "UNREAD: blank EIN"
+    if rt in EXTRACTORS:
+        rd = root.find(_tag("ReturnData"))
+        if rd is None or rd.find(_tag(f"IRS{rt}")) is None:
+            return f"UNREAD: no ReturnData/IRS{rt} element"
+    return None
+
+
+def refuse_unread(db_path, limit=50):
+    """-> (code, rows, total): (4, up to `limit` rows of (object_id, source_file, parse_error), their total) when any
+    row of the WHOLE returns table carries a parse error, else (0, [], 0). Whole table, not this run's (purple's U2):
+    a stopped run's rows keep stopping later runs until they are dealt with. One bad file stops the run: measured
+    2026-11-01, 0 of the 5,716,745 rows from batches before 09A carried a parse error, a blank EIN or a blank return
+    type, and the live table read 0 at landing (relay datadawn orange #1 item 1(h))."""
+    con = sqlite3.connect(db_path)
+    try:
+        total = con.execute("SELECT COUNT(*) FROM returns WHERE parse_error IS NOT NULL").fetchone()[0]
+        rows = con.execute(UNREAD_QUERY + " LIMIT ?", (limit,)).fetchall() if total else []
+    finally:
+        con.close()
+    return (4 if total else 0), rows, total
+
+
+def stop_if_unread(db_path):
+    """Exit 4, naming each parse-error row (object_id, source file, reason; up to 50, then the total and the query
+    for the rest; purple's U1), when the returns table holds any. update.sh runs this script under set -e, so the
+    monthly stops before the detail parsers, the canonical refresh and any deploy. Recovery: 990project/PIPELINE.md,
+    'The parse-error stop'."""
+    code, rows, total = refuse_unread(db_path)
+    if not code:
+        return
+    logging.error(f"UNREAD FILES: {total:,} row(s) in returns carry a parse error; refusing (exit {code}) so "
+                  "nothing downstream runs on them. object_id / source file / reason:")
+    for oid, src, why in rows:
+        logging.error(f"  {oid}  {src}  {why}")
+    if total > len(rows):
+        logging.error(f"  ... and {total - len(rows):,} more; list every one with: {UNREAD_QUERY}")
+    logging.error("Recovery: 990project/PIPELINE.md, 'The parse-error stop'.")
+    sys.exit(code)
+
+
 def parse_file(filepath):
     oid = object_id_from_path(filepath)
     row = {col: None for col in COLUMNS}
@@ -683,7 +752,7 @@ def parse_file(filepath):
 
     try:
         tree = ET.parse(filepath, parser=_SAFE_PARSER)
-        root = tree.getroot()
+        root = add_ns_if_missing(tree.getroot())
 
         return_type = find_text(root, "ReturnHeader.ReturnTypeCd")
         row["return_type"] = return_type
@@ -717,6 +786,10 @@ def parse_file(filepath):
         if extractor:
             extractor(root, row)
 
+        reason = unread_reason(root, row)
+        if reason:
+            row["parse_error"] = reason
+
     except Exception as e:
         row["parse_error"] = f"{type(e).__name__}: {e}"
 
@@ -742,7 +815,9 @@ def _check_namespace_or_bail(sample_files):
             tree = ET.parse(fp, parser=_SAFE_PARSER)
             root_tag = tree.getroot().tag
             ns = root_tag.split('}')[0].lstrip('{') if '}' in root_tag else ''
-            if ns != NS:
+            # A bare root (no namespace) is read by add_ns_if_missing (relay datadawn orange #1 item 1), so only a
+            # DIFFERENT namespace is a schema bump (item 1(h); purple d8ee588a's review, governance 8acb93b).
+            if ns not in (NS, ""):
                 mismatches.append((fp, ns))
         except Exception as e:
             parse_failures += 1
@@ -900,6 +975,7 @@ def main():
 
     if not todo:
         logging.info("Nothing to do.")
+        stop_if_unread(DB_PATH)   # a stopped run's rows still stop a run with nothing new (purple's U2)
         return
 
     if limit:
@@ -934,6 +1010,9 @@ def main():
 
     # Print summary stats
     _print_summary(DB_PATH)
+
+    # One unread file stops the run (relay datadawn orange #1 item 1(h); purple d8ee588a's U1-U4).
+    stop_if_unread(DB_PATH)
 
 
 def _print_summary(db_path):

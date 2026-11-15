@@ -12,9 +12,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:image" content="https://datadawn.org/datadawn-og.png">
   <title>{% block title %}DataDawn{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link href="https://datadawn.org/fonts/fonts.css" rel="stylesheet">
   <link rel="stylesheet" href="/assets/datadawn.css">
   {% block head %}{% endblock %}
 </head>
@@ -31,7 +29,7 @@
     {% block content %}{% endblock %}
   </div>
   <footer>
-    <div>DataDawn &mdash; Pure information from public records &mdash; Free forever</div>
+    <div>DataDawn &mdash; Pure information from public records &mdash; Free forever &middot; <a href="https://datadawn.org/privacy">Privacy</a></div>
   </footer>
 </body>
 </html>

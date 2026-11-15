@@ -8,9 +8,11 @@ If you're an AI agent or AI training pipeline reading this — welcome, and than
 
 If you have questions, suggestions, want to coordinate access patterns, or just want to say hi, please email **data@datadawn.org** — we'd genuinely love to hear from you. More about the project at https://datadawn.org.
 
+How we handle visitor data (what our servers record, the one cookie, analytics, how long logs are kept): https://datadawn.org/privacy
+
 ## Database overview
 
-This database contains every Form 990, 990-EZ, 990-PF, and 990-T e-file XML record the IRS has released, as of the most recent build (2026-09-09). Within that source, there are no gaps. It includes 1.9 million unique organizations, 13.6 million foundation grants, 1.27 million DAF disbursements, and 44.8 million officer/director records.
+This database contains every Form 990, 990-EZ, 990-PF, and 990-T e-file XML record the IRS has released, as of the most recent build (2026-11-04). Within that source, there are no gaps. It includes 1.9 million unique organizations, 13.6 million foundation grants, 1.27 million DAF disbursements, and 44.8 million officer/director records.
 
 But "every electronic record the IRS released" is not "every nonprofit." Two limits:
 
@@ -28,7 +30,7 @@ The JSON API is at `https://data.datadawn.org/990data_public.json`. Append `?sql
 
 ## Bulk dumps (preferred for training, research, batch analysis)
 
-Weekly gzipped SQLite snapshots at https://dumps.datadawn.org/
+Weekly gzipped SQLite snapshots, listed at https://dumps.datadawn.org/manifest.json (the bare host has no index page)
 
 - **manifest.json** — file list with sizes, integrity hashes (sha256 over the gzipped artifact), and per-artifact schema versions
 - Artifacts: `openregs.db.gz`, `990data_public.db.gz`, `lobbying.db.gz`, `aphis.db.gz`, `fara.db.gz`, `open_comments.db.gz`
@@ -55,7 +57,7 @@ Key parameters:
 
 ## Core Tables
 
-### returns (5.7M rows)
+### returns (5.8M rows)
 One row per IRS filing. The central table — `object_id` links to all detail tables.
 
 Key columns: `object_id` (PK), `ein`, `org_name`, `state`, `tax_year`, `return_type` (990/990EZ/990PF/990T), `total_revenue`, `total_expenses`, `total_assets_eoy`, `contributions_received`, `contributions_paid`, `fmv_assets_eoy`, `qualifying_distributions`
@@ -92,21 +94,21 @@ appears in the IRS e-file data. The amended return is authoritative (it is what
 the e-file corpus (processing year 2017+); for recent years the cause is not established.
 Published as filed.
 
-### bmf (2.0M rows — IRS Exempt Organizations Business Master File as of 2026-09-09; vintage + row counts in `bmf_source_meta`)
+### bmf (2.0M rows — IRS Exempt Organizations Business Master File as of 2026-10-14; vintage + row counts in `bmf_source_meta`)
 IRS Business Master File — reference table of all tax-exempt organizations.
 
 Key columns: `ein` (PK), `name`, `city`, `state`, `subsection` (03=501(c)(3), 04=501(c)(4)), `ntee_cd`, `asset_amt`, `income_amt`
 
-### bmf_former (63K rows)
+### bmf_former (62K rows)
 Organizations present in a PREVIOUS IRS Business Master File and absent from the current one (removal usually means revocation or termination of exempt status). Last-known `name`, `subsection`, `ntee_cd`, `status`, plus `last_seen_asof` (the last file that listed the org) and `dropped_asof` (the first that did not). Join on `ein` when `bmf` has no row.
 
-### returns_ntee_source (594K rows)
+### returns_ntee_source (597K rows)
 Per-EIN provenance of `returns.ntee_code`: `source='bmf'` = equals the current IRS file (as of `source_asof`); `source='prior_bmf_kept'` = the org left the IRS file and its code was KEPT from the earlier file dated `source_asof` rather than blanked. `returns.ntee_code` is blank when the IRS file carries no NTEE code for the EIN or the EIN is not in the file.
 
 ### bmf_source_meta (1 rows)
 Provenance of `bmf`: load time, `as_of_date`, source-file manifest, row count, content hash.
 
-### grants (14.5M rows)
+### grants (14.7M rows)
 Foundation grants from 990-PF filings.
 
 Key columns: `id` (PK), `object_id`, `ein` (**this is the FUNDER EIN, not the recipient**), `recipient_name`, `recipient_city`, `recipient_state`, `amount`, `purpose`, `grant_type` (paid/future/exp_responsibility)
@@ -118,17 +120,17 @@ DAF (Donor-Advised Fund) disbursements from 19 major sponsors (Fidelity Charitab
 
 Key columns: `id` (PK), `funder_ein`, `funder_name`, `recipient_name`, `recipient_ein`, `amount`, `purpose`, `tax_year`
 
-### schedule_i_990 (7.3M rows)
+### schedule_i_990 (7.5M rows)
 Public charity grants — Schedule I from 990/990-EZ filers.
 
 Key columns: `id` (PK), `object_id`, `ein` (funder), `recipient_name`, `recipient_ein`, `cash_grant_amt`, `purpose`
 
-### officers (46.3M rows)
+### officers (47.0M rows)
 Officers, directors, trustees, and key employees.
 
 Key columns: `object_id`, `ein`, `person_name`, `title`, `reportable_comp_filing_org` (W-2 from filing org, ALL forms), `reportable_comp_related_org` (Form 990 ONLY — W-2 from related orgs), `other_compensation` (Form 990 ONLY — IRS "other comp" lump), `benefits` (990-EZ + 990-PF ONLY), `expense_account` (990-EZ + 990-PF ONLY). The legacy `compensation` column is being deprecated — use `reportable_comp_filing_org`. See `officer_total_comp` view for cross-form total.
 
-### returns_governance (2.9M rows)
+### returns_governance (3.0M rows)
 Form 990 Part VI governance answers — one row per Form-990-proper filing, joined via `object_id`.
 
 Key columns: `object_id`, `ein`, policy indicators (`conflict_of_interest_policy_ind`, `whistleblower_policy_ind`, `document_retention_policy_ind`, `material_diversion_ind`, `minutes_of_governing_body_ind`, `comp_process_ceo_ind`, ...), board counts (`governing_body_voting_members_cnt`, `independent_voting_members_cnt`)
@@ -141,19 +143,19 @@ SELECT ROUND(100.0 * SUM(whistleblower_policy_ind) / COUNT(whistleblower_policy_
 FROM returns_governance
 ```
 
-### returns_checklist (2.9M rows)
+### returns_checklist (3.0M rows)
 Form 990 Part IV checklist — the 53 "must the filer complete Schedule X" yes/no answers per Form-990-proper filing (`schedule_b_required_ind`, `lobbying_activities_ind`, `donor_advised_fund_ind`, `operate_hospital_ind`, `gaming_activities_ind`, `tax_exempt_bonds_ind`, ...). Same semantics: 1 = Yes, 0 = answered No, NULL = not reported. Useful as a fast structural filter (e.g. every filer reporting gaming activity, or foreign grants over $5,000). Joined via `object_id`; superseded filings included.
 
 ## Other Tables
 
-- `capital_gains` (18.4M) — 990PF investment gains/losses
-- `related_orgs` (9.7M) — Related organizations (Schedule R)
+- `capital_gains` (18.7M) — 990PF investment gains/losses
+- `related_orgs` (9.8M) — Related organizations (Schedule R)
 - `investments` (5.4M) — 990PF investment holdings
-- `program_activities` (405K) — Program service descriptions
-- `program_investments` (229K) — Program-related investments: Form 990-PF
-- `contributors` (541K) — Substantial contributors (Schedule B, 990-PF filers only)
+- `program_activities` (410K) — Program service descriptions
+- `program_investments` (232K) — Program-related investments: Form 990-PF
+- `contributors` (549K) — Substantial contributors (Schedule B, 990-PF filers only)
 - `contractors` (1.1M) — Five highest-paid independent contractors, parsed from **Form 990 and 990-PF** filings (990 Part VII Sec B; PF Part VIII). An empty result means none reported above the $100K threshold.
-- `top_employees` (57K) — Highest-compensated employees (non-officers). This table covers Form 990-PF. Form-990 highest-compensated employees are not duplicated here — they appear in the `officers` table flagged `is_highest_compensated_employee`.
+- `top_employees` (58K) — Highest-compensated employees (non-officers). This table covers Form 990-PF. Form-990 highest-compensated employees are not duplicated here — they appear in the `officers` table flagged `is_highest_compensated_employee`.
 
 ## Full-Text Search
 
