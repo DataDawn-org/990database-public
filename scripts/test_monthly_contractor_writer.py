@@ -16,7 +16,8 @@ Proof set (followup_queue #264 + round-2 memo 2026-07-05):
             contractor rows; the writer must still refuse them)
   P6 (vi)   arity: OFFICER_SQL 11-col vs 990/EZ tuples + PF explicit-column  [PENDING]
   P7 (vii)  duplicate-officer witness (xml=2 exemplar 201931349349304213,
-            THOMAS REGAN) — record collapse-or-store as a receipt for #265   [PENDING]
+            THOMAS REGAN) — stored AS FILED, twice (maintainer's decision 31, §932;
+            flipped 2026-11-13 from §110's collapse to one row; see proof_p7)
   P8 (viii) atomicity witness: SIGKILL mid-flush + injected insert-error
             post-delete; prior rows must survive rollback (round-1 item 2)   [PENDING]
   P9 (ix)   interrupted-run-then-rerun convergence across ALL four tables +
@@ -625,28 +626,35 @@ def proof_p6(mod, scratch):
                                             "round-tripped all 16 columns exactly")
 
 
-def make_raw_officer_variant(scratch_dir):
-    """Writer variant with the §110 keyed dedup REMOVED (raw-emission officer inserts) —
-    the P7 red: the pre-B behavior whose raw dups re-accumulate every monthly (#265
-    consequence 1). Fails loudly if the dedup call site drifts."""
-    src = open(WRITER_UNDER_TEST).read()
-    needle = 'keyed = dedup_officers_keyed(r["officers"])'
-    n = src.count(needle)
-    if n != 1:
-        raise SystemExit(f"HARNESS INVALID: dedup call found {n}x (expected 1) — "
-                         f"re-pin the P7 variant needle before trusting P7.")
-    path = os.path.join(scratch_dir, "writer_raw_officers.py")
-    open(path, "w").write(src.replace(needle, 'keyed = list(r["officers"])'))
-    return load_module(path, "writer_raw_officers")
+def make_collapsing_officer_variant(scratch_dir):
+    """Writer variant that applies §110's keyed collapse to a filing's officer lines before
+    it stores them (the writer's behavior from 2026-07-05 until maintainer's decision 31, §932) —
+    the P7 red. Built by inserting one line after the officer block's opening `if`, a line
+    present once in both the collapsing and the as-filed writer, so the same harness can
+    be run against either. Fails loudly if that line drifts."""
+    src = open(WRITER_UNDER_TEST).read().split("\n")
+    needle = 'if oid not in skip_officers and r["officers"]:'
+    at = [i for i, l in enumerate(src) if l.strip() == needle]
+    if len(at) != 1:
+        raise SystemExit(f"HARNESS INVALID: the officer block's opening line found {len(at)}x "
+                         f"(expected 1) — re-pin the P7 variant needle before trusting P7.")
+    line = src[at[0]]
+    indent = line[:len(line) - len(line.lstrip())] + "    "
+    src.insert(at[0] + 1, indent + 'r["officers"] = dedup_officers_keyed(r["officers"])   # P7 red variant')
+    path = os.path.join(scratch_dir, "writer_collapsing_officers.py")
+    open(path, "w").write("\n".join(src))
+    return load_module(path, "writer_collapsing_officers")
 
 
 def proof_p7(mod, scratch):
-    """P7 (INVERTED 2026-07-05 — R3/done-means-4, going-forward clause): keyed collapse
-    AT THE WRITER. The REAL exemplar (xml=2 THOMAS REGAN byte-dup) must land as ONE
-    stored row under the §110 key while the parser still emits both copies. Red = the
-    raw-insert variant (pre-B writer, dedup stripped) stores 2 → the stored==1 assert
-    fires. History: pre-B this proof asserted store-both as the RECEIPT of then-current
-    behavior (#264(vii)/#265); Deliverable B flips the required behavior."""
+    """P7 (FLIPPED 2026-11-13 to AS FILED — maintainer's decision 31, decisions_log §932; relay datadawn
+    pink #3 item 1, session 81bed5b0): the writer stores every officer line a filing lists. The
+    REAL exemplar (THOMAS REGAN listed twice, byte-identical) must land as TWO stored rows,
+    stored == parser-emitted == the XML's own count. Red = the collapsing variant (§110's keyed
+    collapse at write) stores 1 -> the stored==emitted assert fires.
+    History: before Deliverable B this proof asserted store-both as a receipt (#264(vii)/#265);
+    from 2026-07-05 (R3, going-forward clause) it required the keyed collapse to ONE row; §932
+    replaced that collapse, so it requires store-both again, now as the rule."""
     raw = open(REGAN_XML, encoding="utf-8", errors="replace").read()
     xml_n = raw.count("THOMAS REGAN")
     parsed = mod.parse_file((REGAN_OID, REGAN_XML, "990"))
@@ -659,23 +667,22 @@ def proof_p7(mod, scratch):
         con.close()
         return n
 
-    # RED: the raw-insert variant stores every emitted copy -> the keyed assert must fail on it.
-    raw_mod = make_raw_officer_variant(scratch)
+    # RED: the collapsing variant stores one row for the twice-listed line -> the as-filed assert must fail on it.
+    col_mod = make_collapsing_officer_variant(scratch)
     db_red = fresh_db(scratch, "p7_red")
-    run_writer(raw_mod, db_red, [parsed])
-    red_failed = (stored_count(db_red) == 1) is False
-    red_receipt = (f"raw-insert variant (pre-B writer) stores {stored_count(db_red)} vs 1 "
-                   f"required -> keyed assert fires")
+    run_writer(col_mod, db_red, [parsed])
+    red_failed = (stored_count(db_red) == emitted) is False
+    red_receipt = (f"collapsing variant (§110's keyed collapse at write) stores {stored_count(db_red)} vs "
+                   f"{emitted} emitted -> as-filed assert fires")
 
-    # GREEN: the live keyed writer collapses the byte-dup; parser emission unchanged.
+    # GREEN: the writer under test stores every emitted line; parser emission unchanged.
     db = fresh_db(scratch, "p7_green")
     run_writer(mod, db, [parsed])
     stored = stored_count(db)
-    green = (emitted == xml_n) and (xml_n >= 2) and (stored == 1)
+    green = (emitted == xml_n) and (xml_n >= 2) and (stored == emitted)
     return red_failed, red_receipt, green, (
         f"WITNESS RECEIPT: raw-XML occurrences={xml_n}, parser-emitted={emitted}, "
-        f"writer-stored={stored} -> keyed writer collapses the byte-dup to ONE row "
-        f"(going-forward clause lands at the writer)")
+        f"writer-stored={stored} -> the writer stores the twice-listed line twice, as filed (§932)")
 
 
 FOWLER_OID = "202013089349300746"
@@ -989,7 +996,7 @@ PROOFS = [
     ("P4 parse-error-guard", proof_p4),
     ("P5 ez-pf-untouched", proof_p5),
     ("P6 officer-arity-16col", proof_p6),
-    ("P7-INVERTED keyed-collapse (going-forward clause)", proof_p7),
+    ("P7 officer lines stored as filed (§932)", proof_p7),
     ("P7b fowler-flag-independence", proof_p7b),
     ("P8a atomicity-injected-error", proof_p8a),
     ("P8b atomicity-kill-midstream", proof_p8b),

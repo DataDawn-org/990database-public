@@ -39,6 +39,18 @@ def _tag(name):
     return f"{{{NS}}}{name}"
 
 
+def add_ns_if_missing(root):
+    """Put the efile namespace on every element of a file whose root has none; a namespaced
+    file is returned untouched. IRS batch 2026_TEOS_XML_09A shipped 321 files with a bare
+    <Return> root (2026-11-01; relay datadawn orange #1 item 1). Same helper as
+    extract_990.py's; test: test_parse_without_namespace.py."""
+    if isinstance(root.tag, str) and not root.tag.startswith("{"):
+        for el in root.iter():
+            if isinstance(el.tag, str) and not el.tag.startswith("{"):
+                el.tag = f"{{{NS}}}{el.tag}"
+    return root
+
+
 def find_text(el, dotted_path):
     if el is None:
         return None
@@ -425,7 +437,7 @@ def parse_pf_file(oid, filepath):
 
     try:
         tree = ET.parse(filepath, parser=_SAFE_PARSER)
-        root = tree.getroot()
+        root = add_ns_if_missing(tree.getroot())
         ein_val = find_text(root, "ReturnHeader.Filer.EIN")
         result["ein"] = ein_val
 
@@ -533,7 +545,7 @@ def parse_pf_file(oid, filepath):
             for o in oinfo.findall(_tag("OfficerDirTrstKeyEmplGrp")):
                 result["officers"].append((
                     oid, ein_val,
-                    find_text(o, "PersonNm"),
+                    _pf_person_name(o),   # #306: PersonNm -> BusinessName -> PersonName (relay datadawn pink #4 item 5)
                     find_text(o, "TitleTxt"),
                     float_or_none(find_text(o, "AverageHrsPerWkDevotedToPosRt")),
                     int_or_none(find_text(o, "CompensationAmt")),                # reportable_comp_filing_org
@@ -547,7 +559,7 @@ def parse_pf_file(oid, filepath):
             for e in oinfo.findall(_tag("CompensationHighestPaidEmplGrp")):
                 result["top_employees"].append((
                     oid, ein_val,
-                    find_text(e, "PersonNm"),
+                    _pf_person_name(e),   # #306, as for officers above
                     find_text(e, "TitleTxt"),
                     float_or_none(find_text(e, "AverageHrsPerWkDevotedToPosRt")),
                     int_or_none(find_text(e, "CompensationAmt")),                 # reportable_comp_filing_org
@@ -727,7 +739,9 @@ def _check_namespace_or_bail(sample_filepaths):
             tree = ET.parse(fp, parser=_SAFE_PARSER)
             root_tag = tree.getroot().tag
             ns = root_tag.split('}')[0].lstrip('{') if '}' in root_tag else ''
-            if ns != NS:
+            # A bare root (no namespace) is read by add_ns_if_missing (relay datadawn orange #1 item 1), so only a
+            # DIFFERENT namespace is a schema bump (item 1(h); purple d8ee588a's review, governance 8acb93b).
+            if ns not in (NS, ""):
                 mismatches.append((fp, ns))
         except Exception as e:
             parse_failures += 1

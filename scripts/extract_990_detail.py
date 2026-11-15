@@ -43,6 +43,18 @@ def _tag(name):
     return f"{{{NS}}}{name}"
 
 
+def add_ns_if_missing(root):
+    """Put the efile namespace on every element of a file whose root has none; a namespaced
+    file is returned untouched. IRS batch 2026_TEOS_XML_09A shipped 321 files with a bare
+    <Return> root (2026-11-01; relay datadawn orange #1 item 1). Same helper as
+    extract_990.py's; test: test_parse_without_namespace.py."""
+    if isinstance(root.tag, str) and not root.tag.startswith("{"):
+        for el in root.iter():
+            if isinstance(el.tag, str) and not el.tag.startswith("{"):
+                el.tag = f"{{{NS}}}{el.tag}"
+    return root
+
+
 def find_text(el, dotted_path):
     if el is None:
         return None
@@ -332,6 +344,162 @@ def discover_files(db_path):
     return files, already_officers, already_sched_i, already_related
 
 
+# ── PASS 1: Part IX + Part VIII (schema manifest §H-§J, 990project 74d3846) — NOT WIRED ────────────────────────────
+# extract_pass1() and _pass1_schema_sql() are called by nothing in this file: not create_schema(), not parse_file(),
+# not the writer. The Stage 0 relay wires them, with backfill_pass1.py; until then the monthly is unchanged and no
+# pass-1 table is created. Anchored paths only (brief v2 §3): every value is read from a DIRECT child of
+# ReturnData/IRS990, so Part VIII's line 1c FundraisingAmt can never be read as a Part IX line's column-D FundraisingAmt.
+# Tests: test_extract_pass1.py (the 11-filing witness set, two machine legs; the schema against the pass-1 invariants).
+_P1_IX_GROUPS = [
+    ("GrantsToDomesticOrgsGrp", "grants_domestic_orgs", "AB"), ("GrantsToDomesticIndividualsGrp", "grants_domestic_individuals", "AB"),
+    ("ForeignGrantsGrp", "grants_foreign", "AB"), ("BenefitsToMembersGrp", "benefits_to_members", "AB"),
+    ("CompCurrentOfcrDirectorsGrp", "comp_current_officers", "ABCD"), ("CompDisqualPersonsGrp", "comp_disqualified_persons", "ABCD"),
+    ("OtherSalariesAndWagesGrp", "other_salaries_wages", "ABCD"), ("PensionPlanContributionsGrp", "pension_contributions", "ABCD"),
+    ("OtherEmployeeBenefitsGrp", "other_employee_benefits", "ABCD"), ("PayrollTaxesGrp", "payroll_taxes", "ABCD"),
+    ("FeesForServicesManagementGrp", "fees_management", "ABCD"), ("FeesForServicesLegalGrp", "fees_legal", "ABCD"),
+    ("FeesForServicesAccountingGrp", "fees_accounting", "ABCD"), ("FeesForServicesLobbyingGrp", "fees_lobbying", "ABCD"),
+    ("FeesForServicesProfFundraising", "fees_prof_fundraising", "AD"), ("FeesForSrvcInvstMgmntFeesGrp", "fees_investment_mgmt", "ABCD"),
+    ("FeesForServicesOtherGrp", "fees_other", "ABCD"), ("AdvertisingGrp", "advertising", "ABCD"),
+    ("OfficeExpensesGrp", "office_expenses", "ABCD"), ("InformationTechnologyGrp", "information_technology", "ABCD"),
+    ("RoyaltiesGrp", "royalties", "ABCD"), ("OccupancyGrp", "occupancy", "ABCD"), ("TravelGrp", "travel", "ABCD"),
+    ("PymtTravelEntrtnmntPubOfclGrp", "travel_public_officials", "ABCD"), ("ConferencesMeetingsGrp", "conferences_meetings", "ABCD"),
+    ("InterestGrp", "interest", "ABCD"), ("PaymentsToAffiliatesGrp", "payments_to_affiliates", "ABCD"),
+    ("DepreciationDepletionGrp", "depreciation_depletion", "ABCD"), ("InsuranceGrp", "insurance", "ABCD"),
+    ("AllOtherExpensesGrp", "all_other_expenses", "ABCD"), ("TotalFunctionalExpensesGrp", "total_functional_expenses", "ABCD"),
+    ("TotalJointCostsGrp", "joint_costs", "ABCD"),
+]
+_P1_IX_COL = {"TotalAmt": "total", "ProgramServicesAmt": "program", "ManagementAndGeneralAmt": "mgmt", "FundraisingAmt": "fundraising"}
+_P1_IX_KIND = {"AB": ("TotalAmt", "ProgramServicesAmt"), "AD": ("TotalAmt", "FundraisingAmt"),
+               "ABCD": ("TotalAmt", "ProgramServicesAmt", "ManagementAndGeneralAmt", "FundraisingAmt")}
+_P1_VIII_COL = {"TotalRevenueColumnAmt": "total", "RelatedOrExemptFuncIncomeAmt": "related_exempt",
+                "UnrelatedBusinessRevenueAmt": "unrelated", "ExclusionAmt": "excluded"}
+_P1_VIII_GROUPS = [
+    ("TotalOthProgramServiceRevGrp", "other_program_service"), ("InvestmentIncomeGrp", "investment_income"),
+    ("IncmFromInvestBondProceedsGrp", "bond_proceeds_income"), ("RoyaltiesRevenueGrp", "royalties_revenue"),
+    ("NetRentalIncomeOrLossGrp", "net_rental_income"), ("NetGainOrLossInvestmentsGrp", "net_gain_investments"),
+    ("NetIncomeFromGamingGrp", "net_gaming"), ("NetIncomeOrLossGrp", "net_inventory_sales"),
+    ("MiscellaneousRevenueGrp", "misc_revenue"), ("TotalRevenueGrp", "total_revenue"),
+]
+_P1_VIII_GROUPS_3COL = [("NetIncmFromFundraisingEvtGrp", "net_fundraising_events")]   # line 8c: no column B
+_P1_VIII_SCALARS = [
+    ("FederatedCampaignsAmt", "federated_campaigns"), ("MembershipDuesAmt", "membership_dues"),
+    ("FundraisingAmt", "fundraising_events_contributions"), ("RelatedOrganizationsAmt", "related_organizations"),
+    ("GovernmentGrantsAmt", "government_grants"), ("AllOtherContributionsAmt", "all_other_contributions"),
+    ("NoncashContributionsAmt", "noncash_contributions"), ("TotalContributionsAmt", "total_contributions"),
+    ("TotalProgramServiceRevenueAmt", "total_program_service_revenue"),
+    ("ContriRptFundraisingEventAmt", "fundraising_event_contributions_1c"), ("FundraisingGrossIncomeAmt", "fundraising_gross_income"),
+    ("FundraisingDirectExpensesAmt", "fundraising_direct_expenses"), ("GamingGrossIncomeAmt", "gaming_gross_income"),
+    ("GamingDirectExpensesAmt", "gaming_direct_expenses"), ("GrossSalesOfInventoryAmt", "inventory_gross_sales"),
+    ("CostOfGoodsSoldAmt", "cost_of_goods_sold"), ("OtherRevenueTotalAmt", "other_revenue_total"),
+]
+_P1_VIII_SPLITS = [
+    ("GrossRentsGrp", "gross_rents", ("RealAmt", "PersonalAmt")), ("LessRentalExpensesGrp", "rental_expenses", ("RealAmt", "PersonalAmt")),
+    ("RentalIncomeOrLossGrp", "rental_income", ("RealAmt", "PersonalAmt")),
+    ("GrossAmountSalesAssetsGrp", "asset_sales_gross", ("SecuritiesAmt", "OtherAmt")),
+    ("LessCostOthBasisSalesExpnssGrp", "asset_sales_cost", ("SecuritiesAmt", "OtherAmt")),
+    ("GainOrLossGrp", "asset_sales_gain", ("SecuritiesAmt", "OtherAmt")),
+]
+_P1_SPLIT_COL = {"RealAmt": "real", "PersonalAmt": "personal", "SecuritiesAmt": "securities", "OtherAmt": "other"}
+_P1_DESCRIBED = {   # the repeating, described lines → returns_described_lines, columns A-D in the form's order
+    "OtherExpensesGrp": ("IX_24", ("TotalAmt", "ProgramServicesAmt", "ManagementAndGeneralAmt", "FundraisingAmt")),
+    "ProgramServiceRevenueGrp": ("VIII_2", ("TotalRevenueColumnAmt", "RelatedOrExemptFuncIncomeAmt", "UnrelatedBusinessRevenueAmt", "ExclusionAmt")),
+    "OtherRevenueMiscGrp": ("VIII_11", ("TotalRevenueColumnAmt", "RelatedOrExemptFuncIncomeAmt", "UnrelatedBusinessRevenueAmt", "ExclusionAmt")),
+}
+
+
+def _p1_ind(val):
+    if val is None:
+        return None
+    v = val.strip().lower()
+    return 1 if v in ("x", "true", "1") else 0 if v in ("false", "0") else None
+
+
+def _pass1_columns():
+    ix = ([f"{stem}_{_P1_IX_COL[c]}" for _, stem, kind in _P1_IX_GROUPS for c in _P1_IX_KIND[kind]]
+          + ["info_in_sched_o_part_ix_ind", "joint_costs_ind"])
+    viii = ([col for _, col in _P1_VIII_SCALARS]
+            + [f"{stem}_{c}" for _, stem in _P1_VIII_GROUPS for c in _P1_VIII_COL.values()]
+            + [f"{stem}_{c}" for _, stem in _P1_VIII_GROUPS_3COL for c in ("total", "unrelated", "excluded")]
+            + [f"{stem}_{_P1_SPLIT_COL[p]}" for _, stem, parts in _P1_VIII_SPLITS for p in parts]
+            + ["info_in_sched_o_part_viii_ind"])
+    return ix, viii
+
+
+def _pass1_schema_sql():
+    ix, viii = _pass1_columns()
+    return (f"CREATE TABLE IF NOT EXISTS returns_expenses (object_id TEXT NOT NULL, ein TEXT, "
+            f"{', '.join(c + ' INTEGER' for c in ix)});\n"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_oid ON returns_expenses(object_id);\n"
+            f"CREATE TABLE IF NOT EXISTS returns_revenue (object_id TEXT NOT NULL, ein TEXT, "
+            f"{', '.join(c + ' INTEGER' for c in viii)});\n"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_revenue_oid ON returns_revenue(object_id);\n"
+            "CREATE TABLE IF NOT EXISTS returns_described_lines (object_id TEXT NOT NULL, ein TEXT, part TEXT NOT NULL, "
+            "seq INTEGER NOT NULL, description TEXT, business_code TEXT, col_a INTEGER, col_b INTEGER, col_c INTEGER, "
+            "col_d INTEGER, PRIMARY KEY (object_id, part, seq));\n")
+
+
+def extract_pass1(path):
+    """(ix, viii, described) for one Form 990 filing: Part IX line columns, Part VIII lines, and the repeating described
+    lines (24a-d, 2a-e, 11a-c). Absent elements are absent keys (stored NULL, never 0). Raises on an unreadable file,
+    so the backfill driver records it as a failure instead of writing rows."""
+    root = add_ns_if_missing(ET.parse(path, _SAFE_PARSER).getroot())
+    rd = root.find(_tag("ReturnData"))
+    irs = rd.find(_tag("IRS990")) if rd is not None else None
+    if irs is None:
+        raise ValueError("no ReturnData/IRS990 element")
+    ix, viii, described = {}, {}, []
+    for grp, stem, kind in _P1_IX_GROUPS:
+        g = irs.find(_tag(grp))
+        if g is not None:
+            for c in _P1_IX_KIND[kind]:
+                v = g.find(_tag(c))
+                if v is not None:
+                    ix[f"{stem}_{_P1_IX_COL[c]}"] = int_or_none(v.text)
+    ind = irs.find(_tag("InfoInScheduleOPartIXInd"))
+    if ind is not None:
+        ix["info_in_sched_o_part_ix_ind"] = _p1_ind(ind.text)
+    # Line 26's indicator, separate from its amounts group: a filing may carry either without the other, in every
+    # version measured (manifest 3ffef96; plan beab799 D6).
+    ind = irs.find(_tag("JointCostsInd"))
+    if ind is not None:
+        ix["joint_costs_ind"] = _p1_ind(ind.text)
+    for grp, stem in _P1_VIII_GROUPS + _P1_VIII_GROUPS_3COL:
+        g = irs.find(_tag(grp))
+        if g is not None:
+            for c, col in _P1_VIII_COL.items():
+                if (grp, stem) in _P1_VIII_GROUPS_3COL and col == "related_exempt":
+                    continue
+                v = g.find(_tag(c))
+                if v is not None:
+                    viii[f"{stem}_{col}"] = int_or_none(v.text)
+    for el, col in _P1_VIII_SCALARS:
+        v = irs.find(_tag(el))
+        if v is not None and len(v) == 0:
+            viii[col] = int_or_none(v.text)
+    for grp, stem, parts in _P1_VIII_SPLITS:
+        g = irs.find(_tag(grp))
+        if g is not None:
+            for p in parts:
+                v = g.find(_tag(p))
+                if v is not None:
+                    viii[f"{stem}_{_P1_SPLIT_COL[p]}"] = int_or_none(v.text)
+    ind = irs.find(_tag("InfoInScheduleOPartVIIIInd"))
+    if ind is not None:
+        viii["info_in_sched_o_part_viii_ind"] = _p1_ind(ind.text)
+    seqs = {}
+    for g in irs:
+        name = g.tag.rsplit("}", 1)[-1] if isinstance(g.tag, str) else None
+        if name in _P1_DESCRIBED:
+            part, cols = _P1_DESCRIBED[name]
+            seqs[part] = seqs.get(part, 0) + 1
+            row = {"part": part, "seq": seqs[part], "description": find_text(g, "Desc"), "business_code": find_text(g, "BusinessCd")}
+            for letter, c in zip("abcd", cols):
+                v = g.find(_tag(c))
+                row[f"col_{letter}"] = int_or_none(v.text) if v is not None else None
+            described.append(row)
+    return ix, viii, described
+
+
 # ── Per-File Extraction ───────────────────────────────────────────────────
 def parse_file(args):
     oid, filepath, return_type = args
@@ -353,7 +521,7 @@ def parse_file(args):
 
     try:
         tree = ET.parse(filepath, parser=_SAFE_PARSER)
-        root = tree.getroot()
+        root = add_ns_if_missing(tree.getroot())
         ein_val = find_text(root, EIN_PATH)
         result["ein"] = ein_val
 
@@ -402,6 +570,10 @@ def _officer_name(grp):
 
 
 # ── §110/§F keyed dedup (Deliverable B; R1–R3 rulings 2026-07-05) ───────────
+# RETIRED AT THE WRITER by maintainer's decision 31 (decisions_log §932): writer_process stores
+# officer lines as filed and no longer calls dedup_officers_keyed. The key stays for the
+# witnesses test (test_officer_key_witnesses.py); rederive_officers_keyed.py, which applies
+# it, refuses the real corpus.
 # Key = person name + six role flags + six substantive fields + captured hours (R1:
 # avg_hours_per_week IS in the key), compared AFTER canonicalization (absent-vs-zero → 0,
 # text whitespace-run normalization). Singleton rows store the raw emission (no-change
@@ -749,7 +921,9 @@ def _check_namespace_or_bail(sample_filepaths):
             tree = ET.parse(fp, parser=_SAFE_PARSER)
             root_tag = tree.getroot().tag
             ns = root_tag.split('}')[0].lstrip('{') if '}' in root_tag else ''
-            if ns != NS:
+            # A bare root (no namespace) is read by add_ns_if_missing (relay datadawn orange #1 item 1), so only a
+            # DIFFERENT namespace is a schema bump (item 1(h); purple d8ee588a's review, governance 8acb93b).
+            if ns not in (NS, ""):
                 mismatches.append((fp, ns))
         except Exception as e:
             parse_failures += 1
@@ -868,13 +1042,15 @@ def writer_process(db_path, result_queue, total_files,
             if r.get("error"):
                 counts["errors"] += 1
 
-            # Officers (skip if already in DB). Going-forward clause (§110 / R1–R3
-            # rulings 2026-07-05): writes land under the keyed dedup, never the raw
-            # emission — otherwise raw dups re-accumulate every monthly (#265 conseq. 1).
+            # Officers (skip if already in DB), stored AS FILED: every line the filing
+            # lists, a line it lists twice stored twice (maintainer's decision 31, decisions_log
+            # §932, amending §110; relay datadawn pink #3 item 1). From 2026-07-05 until
+            # §932 the writer applied §110's keyed collapse here (dedup_officers_keyed,
+            # kept above for the witnesses test); the public build marks a line identical
+            # to an earlier one on the same filing in repeats_earlier_line (§931).
             if oid not in skip_officers and r["officers"]:
-                keyed = dedup_officers_keyed(r["officers"])
-                officer_buf.extend(keyed)
-                counts["officers"] += len(keyed)
+                officer_buf.extend(r["officers"])
+                counts["officers"] += len(r["officers"])
 
             # Schedule I
             if oid not in skip_sched_i and r["schedule_i"]:
