@@ -10,6 +10,8 @@ If you have questions, suggestions, want to coordinate access patterns, or just 
 
 How we handle visitor data (what our servers record, the one cookie, analytics, how long logs are kept): https://datadawn.org/privacy
 
+DataDawn is still being built. We're finding and fixing problems in the data as we go, so some of what you see here will change. Our downloads are dated snapshots: a fix reaches only downloads made after it.
+
 ## Database overview
 
 This database contains every Form 990, 990-EZ, 990-PF, and 990-T e-file XML record the IRS has released, as of the most recent build (2026-11-04). Within that source, there are no gaps. It includes 1.9 million unique organizations, 13.6 million foundation grants, 1.27 million DAF disbursements, and 44.8 million officer/director records.
