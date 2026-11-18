@@ -274,11 +274,15 @@ jobs:
           fi
           echo "OK: whole tree clean."
 
-      - name: Report to healthchecks.io main check (push, schedule, manual; never PRs)
+      - name: Report to healthchecks.io main check (runs of main only; never PRs or canary branches)
         # PR verdicts surface in the PR itself; the scheduled half needs a
         # wired alert or it is monitor-theater — so a missing ping URL is
         # itself a failure, never silently green.
-        if: always() && github.event_name != 'pull_request'
+        # Runs of main ONLY (queue #721; decisions_log §907): the weekly run, a push to main and a
+        # manual run of main (the alert-path self-test) report here. The leak-gate canary dispatches
+        # this workflow on a throwaway branch holding a planted sample, so its expected failure must
+        # not reach main's check; the canary reports to a check of its own.
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           HC_URL: ${{ secrets.LEAK_TREE_HC_URL }}
         run: |
@@ -294,8 +298,8 @@ jobs:
 
   pr-alert:
     # Pages on a failed leak check on a SAME-REPO pull request (decisions_log §188). Pings this
-    # repo's OWN PR check (secret LEAK_PR_HC_URL), never main's leak-tree check, which push, schedule
-    # and manual runs keep pinging from scan-tree. Success on pass, /fail on fail; the next passing PR
+    # repo's OWN PR check (secret LEAK_PR_HC_URL), never main's leak-tree check, which runs of main
+    # (push, schedule, manual) keep pinging from scan-tree. Success on pass, /fail on fail; the next passing PR
     # brings a downed check back up. Fork PRs and Dependabot's secret pool carry no LEAK_PR_HC_URL,
     # so the step skips quietly there, and Dependabot's own PRs skip the leak jobs (§184(c)) and this job.
     needs: [scan, scan-tree]
