@@ -52,17 +52,47 @@ jobs:
           fi
           # --redact masks matched values in output (Actions logs are public + retained)
           # --log-opts scopes the scan to the commits this PR or push added
+          # gitleaks exits 0 having read nothing when git can't give it the range's patches, so the step also checks
+          # gitleaks' own count: exactly one "N commits scanned" line, with N at least the commits in the range that
+          # add a line (a merge, or a commit that only deletes or only touches binary files, need not be counted).
+          # gitleaks hands each word of --log-opts to git log, so git gives it each commit's own text whatever the
+          # runner's config or the change's .gitattributes say: --no-color, --no-textconv, and --text (a NUL byte or a
+          # -diff attribute otherwise shows gitleaks "Binary files differ")
+          set +e
           gitleaks detect \
             --config .gitleaks.toml \
-            --log-opts="${range}" \
+            --log-opts="--no-color --no-textconv --text ${range}" \
             --redact \
             --no-banner \
             --report-format json \
-            --report-path /tmp/leaks.json
+            --report-path /tmp/leaks.json > /tmp/gitleaks.out 2>&1
+          gl=$?
+          set -e
+          cat /tmp/gitleaks.out
+          if [ "$gl" -ne 0 ]; then
+            exit "$gl"
+          fi
+          if ! numstat=$(git log --no-color --no-textconv --no-ext-diff --format='commit %H' --numstat ${range}); then
+            echo "::error::Could not read the commits in ${range} to check gitleaks' count against them."
+            exit 1
+          fi
+          floor=$(printf '%s\n' "$numstat" | awk -F'\t' '/^commit / { c = $0; next } $1 ~ /^[0-9]+$/ && $1 > 0 && !(c in s) { s[c] = 1; n++ } END { print n + 0 }')
+          seen=$(awk '/[0-9]+ commits scanned/ { k++; if (match($0, /[0-9]+ commits scanned/)) v = substr($0, RSTART, RLENGTH) + 0 } END { print k + 0, v + 0 }' /tmp/gitleaks.out)
+          lines=${seen% *}
+          scanned=${seen#* }
+          if [ "$lines" -ne 1 ]; then
+            echo "::error::gitleaks exited 0 but printed ${lines} \"commits scanned\" lines, not one, so nothing shows it read the added commits."
+            exit 1
+          fi
+          if [ "$scanned" -lt "$floor" ]; then
+            echo "::error::gitleaks scanned ${scanned} commit(s), but ${floor} commit(s) in ${range} add a line, so part of the change went unscanned."
+            exit 1
+          fi
+          echo "gitleaks scanned ${scanned} commit(s); ${floor} in ${range} add a line."
 
       - name: Summarize on failure
         if: failure()
         run: |
-          echo "::error::Gitleaks flagged credential-shape content in the added commits (${{ github.event_name }})."
+          echo "::error::The credential-class scan failed on the added commits (${{ github.event_name }}): gitleaks flagged credential-shape content, or its own count did not show it read them (the scan step's ::error:: line says which)."
           echo "Run locally to see redacted details: gitleaks protect --staged --config .gitleaks.toml --redact"
           echo "Identity-marker scan is handled separately by leak-scan.yml."
